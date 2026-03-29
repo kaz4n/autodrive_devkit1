@@ -30,10 +30,12 @@ class RoboRacerAutonomyNode(Node):
         super().__init__('roboracer_autonomy')
         self.declare_parameter('use_camera', True)
         self.declare_parameter('max_speed_mps', 4.0)
+        self.declare_parameter('control_hz', 1000.0)
 
         self._config = StackConfig()
         self._config.camera.enabled = bool(self.get_parameter('use_camera').value)
         self._config.planner.max_speed_mps = float(self.get_parameter('max_speed_mps').value)
+        self._control_hz = max(1.0, float(self.get_parameter('control_hz').value))
 
         qos = QoSProfile(
             reliability=QoSReliabilityPolicy.RELIABLE,
@@ -76,10 +78,11 @@ class RoboRacerAutonomyNode(Node):
         if self._config.camera.enabled:
             self.create_subscription(Image, f'{prefix}/front_camera', self._on_front_camera, qos)
 
-        self.create_timer(1.0 / 30.0, self._control_loop)
+        self.create_timer(1.0 / self._control_hz, self._control_loop)
         self.get_logger().info(
             f'RoboRacer autonomy stack ready. use_camera={self._config.camera.enabled}, '
-            f'max_speed_mps={self._config.planner.max_speed_mps:.2f}'
+            f'max_speed_mps={self._config.planner.max_speed_mps:.2f}, '
+            f'control_hz={self._control_hz:.1f}'
         )
 
     def _now(self) -> float:
