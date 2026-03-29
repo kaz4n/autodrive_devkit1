@@ -55,7 +55,7 @@ class PlannerConfig:
     max_lookahead_m: float = 2.20
     lookahead_speed_gain: float = 0.18
     lateral_accel_limit_mps2: float = 4.5
-    clearance_speed_gain: float = 1.25
+    clearance_speed_gain: float = 1.25 #was 1.25
     steering_bias_limit_rad: float = 0.85
     gap_activation_angle_rad: float = 0.30
     camera_confidence_threshold: float = 0.25
@@ -74,9 +74,16 @@ class ControllerConfig:
 
 @dataclass
 class MissionConfig:
-    sensor_timeout_s: float = 0.35
+    sensor_timeout_s: float = 0.35 #was 0.35
+    steering_timeout_s: float = 0.70
     camera_timeout_s: float = 0.45
-    bootstrap_time_s: float = 0.20
+    bootstrap_time_s: float = 0.2 #was 0.2
+    safety_clearance_enter_m: float = 0.35
+    safety_clearance_exit_m: float = 0.55
+    safety_ttc_enter_s: float = 0.45
+    safety_ttc_exit_s: float = 0.80
+    safety_brake_hold_s: float = 0.30
+    stale_cycles_before_brake: int = 5
     recovery_enabled: bool = False
     recovery_reverse_throttle: float = -0.15
     recovery_duration_s: float = 0.50

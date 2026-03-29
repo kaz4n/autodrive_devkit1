@@ -12,8 +12,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('use_camera', default_value='true'),
-        DeclareLaunchArgument('max_speed_mps', default_value='4.0'),
-        DeclareLaunchArgument('control_hz', default_value='1000.0'),
+        DeclareLaunchArgument('max_speed_mps', default_value='15.0'),
+        DeclareLaunchArgument('control_hz', default_value='80.0'),
         Node(
             package='autodrive_roboracer',
             executable='autodrive_bridge',
