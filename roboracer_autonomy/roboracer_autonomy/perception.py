@@ -18,6 +18,7 @@ from .params import CameraConfig, LidarConfig
 class LidarPerception:
     def __init__(self, config: LidarConfig) -> None:
         self._config = config
+        self._previous_gap_target_angle: float = 0.0
 
     def process(
         self,
@@ -64,10 +65,17 @@ class LidarPerception:
             gap_end = target_index
         else:
             candidate_indices = np.arange(gap_start, gap_end + 1)
-            score = gap_ranges[candidate_indices] - 0.45 * np.abs(angles[candidate_indices])
+            candidate_angles = angles[candidate_indices]
+            continuity_penalty = np.abs(candidate_angles - self._previous_gap_target_angle)
+            score = (
+                gap_ranges[candidate_indices]
+                - 0.45 * np.abs(candidate_angles)
+                - self._config.gap_continuity_weight * continuity_penalty
+            )
             target_index = int(candidate_indices[np.argmax(score)])
 
         gap_target_angle = float(angles[target_index])
+        self._previous_gap_target_angle = gap_target_angle
         lane_width_estimate, center_bias = self._estimate_corridor_bias(processed, angles)
         ttc = float(np.inf)
         if speed_mps > 0.15:

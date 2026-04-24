@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from .math_utils import clamp
+from .math_utils import clamp, low_pass
 from .models import ControlCommand, MissionMode, Plan, VehicleState
 from .params import ControllerConfig, VehicleGeometry
 
@@ -24,6 +24,8 @@ class LowLevelController:
         self._last_throttle = 0.0
         self._last_steering = 0.0
         self._last_stamp = 0.0
+        self._last_mode = MissionMode.BOOTSTRAP
+        self._yaw_rate_filtered = 0.0
 
     def compute(self, plan: Plan, state: VehicleState, stamp: float) -> ControlCommand:
         dt = stamp - self._last_stamp if self._last_stamp > 0.0 else 0.05
@@ -31,7 +33,12 @@ class LowLevelController:
 
         desired_steer_angle = math.atan(self._geometry.wheelbase_m * plan.curvature)
         normalized_steer = desired_steer_angle / max(self._geometry.max_steer_angle_rad, 1e-6)
-        normalized_steer -= self._config.steer_yaw_rate_damping * state.yaw_rate
+        self._yaw_rate_filtered = low_pass(
+            self._yaw_rate_filtered,
+            state.yaw_rate,
+            self._config.yaw_rate_low_pass_alpha,
+        )
+        normalized_steer -= self._config.steer_yaw_rate_damping * self._yaw_rate_filtered
         normalized_steer = self._rate_limit(
             self._last_steering,
             clamp(normalized_steer, -1.0, 1.0),
@@ -41,6 +48,8 @@ class LowLevelController:
 
         if plan.mode == MissionMode.SAFETY_BRAKE or plan.target_speed <= 0.05:
             throttle = 0.0
+            self._reset_pid(stamp)
+            self._last_mode = plan.mode
             command = ControlCommand(
                 stamp=stamp,
                 throttle=0.0,
@@ -73,6 +82,9 @@ class LowLevelController:
             emergency=False,
             reason=plan.mode.value,
         )
+        if plan.mode != self._last_mode:
+            self._reset_pid(stamp)
+            self._last_mode = plan.mode
         self._cache(throttle, normalized_steer, stamp)
         return command
 
@@ -103,3 +115,8 @@ class LowLevelController:
         self._last_throttle = throttle
         self._last_steering = steering
         self._last_stamp = stamp
+
+    def _reset_pid(self, stamp: float) -> None:
+        self._pid.integral = 0.0
+        self._pid.previous_error = 0.0
+        self._pid.previous_stamp = stamp

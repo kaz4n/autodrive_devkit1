@@ -35,8 +35,18 @@ class ReactivePlanner:
             desired_heading = 0.55 * lidar.center_bias + 0.45 * lidar.gap_target_angle
 
         if camera.confidence >= self._config.camera_confidence_threshold:
-            camera_weight = min(0.25, 0.25 * camera.confidence)
-            desired_heading = (1.0 - camera_weight) * desired_heading + camera_weight * camera.heading_error
+            camera_age = max(0.0, stamp - camera.stamp)
+            stale_after = max(self._config.camera_stale_after_s, 1e-3)
+            full_decay = max(self._config.camera_stale_full_decay_s, stale_after + 1e-3)
+            if camera_age <= stale_after:
+                freshness = 1.0
+            elif camera_age >= full_decay:
+                freshness = 0.0
+            else:
+                freshness = 1.0 - (camera_age - stale_after) / (full_decay - stale_after)
+            camera_weight = min(0.25, 0.25 * camera.confidence) * freshness
+            camera_heading = camera.heading_error + self._config.camera_center_offset_gain * camera.center_offset
+            desired_heading = (1.0 - camera_weight) * desired_heading + camera_weight * camera_heading
 
         desired_heading = float(clamp(desired_heading, -self._config.steering_bias_limit_rad, self._config.steering_bias_limit_rad))
         curvature = 2.0 * math.sin(desired_heading) / max(lookahead, 1e-3)

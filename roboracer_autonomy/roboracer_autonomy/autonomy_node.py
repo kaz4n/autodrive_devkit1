@@ -35,6 +35,8 @@ class RoboRacerAutonomyNode(Node):
         self._config = StackConfig()
         self._config.camera.enabled = bool(self.get_parameter('use_camera').value)
         self._config.planner.max_speed_mps = float(self.get_parameter('max_speed_mps').value)
+        self._config.mission.gap_enter_angle_rad = self._config.planner.gap_activation_angle_rad
+        self._config.mission.gap_exit_angle_rad = 0.65 * self._config.mission.gap_enter_angle_rad
         self._control_hz = max(1.0, float(self.get_parameter('control_hz').value))
 
         qos = QoSProfile(

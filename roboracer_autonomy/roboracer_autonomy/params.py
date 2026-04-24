@@ -28,6 +28,7 @@ class LidarConfig:
     range_max_clip_m: float = 8.0
     lane_width_slowdown_m: float = 1.1
     lane_width_confident_m: float = 1.4
+    gap_continuity_weight: float = 0.30
 
 
 @dataclass
@@ -59,6 +60,9 @@ class PlannerConfig:
     steering_bias_limit_rad: float = 0.85
     gap_activation_angle_rad: float = 0.30
     camera_confidence_threshold: float = 0.25
+    camera_stale_after_s: float = 0.15
+    camera_stale_full_decay_s: float = 0.45
+    camera_center_offset_gain: float = 0.18
 
 
 @dataclass
@@ -70,6 +74,7 @@ class ControllerConfig:
     steer_yaw_rate_damping: float = 0.08
     throttle_rate_limit_per_s: float = 1.4
     steering_rate_limit_per_s: float = 4.0
+    yaw_rate_low_pass_alpha: float = 0.30
 
 
 @dataclass
