@@ -56,7 +56,19 @@ class ReactivePlanner:
             target_speed = max(target_speed, min(self._config.straight_speed_mps, self._config.max_speed_mps))
         if lidar.lane_width_estimate > 0.0 and lidar.lane_width_estimate < 1.05:
             target_speed = min(target_speed, 1.8)
-        if lidar.ttc < 0.55 or lidar.forward_clearance < 0.40:
+
+        # Smoothly scale speed as risk rises to reduce mode/speed chatter near thresholds.
+        clearance_risk = clamp((0.80 - lidar.forward_clearance) / 0.45, 0.0, 1.0)
+        if lidar.ttc == float('inf'):
+            ttc_risk = 0.0
+        else:
+            ttc_risk = clamp((1.20 - lidar.ttc) / 0.75, 0.0, 1.0)
+        risk = max(clearance_risk, ttc_risk)
+        risk_scale = 1.0 - 0.90 * (risk ** 1.5)
+        target_speed *= clamp(risk_scale, 0.10, 1.0)
+
+        # Keep a hard-stop envelope for imminent collision states.
+        if lidar.ttc < 0.35 or lidar.forward_clearance < 0.30:
             target_speed = 0.0
 
         target_speed = float(clamp(target_speed, self._config.min_speed_mps, self._config.max_speed_mps))

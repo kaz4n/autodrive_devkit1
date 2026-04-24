@@ -11,6 +11,8 @@ class MissionManager:
         self._previous_mode = MissionMode.BOOTSTRAP
         self._safety_hold_until: float = 0.0
         self._stale_cycle_count: int = 0
+        self._gap_enter_count: int = 0
+        self._gap_exit_count: int = 0
 
     def decide(
         self,
@@ -59,10 +61,45 @@ class MissionManager:
             self._previous_mode = MissionMode.SAFETY_BRAKE
             return MissionMode.SAFETY_BRAKE
 
-        if lidar.blocked or abs(lidar.gap_target_angle) > 0.30:
+        should_enter_gap_avoid = (
+            lidar.blocked
+            or abs(lidar.gap_target_angle) > self._config.gap_enter_angle_rad
+        )
+        should_exit_gap_avoid = (
+            not lidar.blocked
+            and abs(lidar.gap_target_angle) < self._config.gap_exit_angle_rad
+            and lidar.forward_clearance > self._config.safety_clearance_exit_m
+            and lidar.ttc > self._config.safety_ttc_exit_s
+        )
+
+        if self._previous_mode == MissionMode.GAP_AVOID:
+            if should_exit_gap_avoid:
+                self._gap_exit_count += 1
+            else:
+                self._gap_exit_count = 0
+
+            if self._gap_exit_count >= self._config.gap_exit_consecutive_scans:
+                self._gap_exit_count = 0
+                self._gap_enter_count = 0
+                self._previous_mode = MissionMode.TRACK
+                return MissionMode.TRACK
+
+            self._gap_enter_count = 0
             self._previous_mode = MissionMode.GAP_AVOID
             return MissionMode.GAP_AVOID
 
+        if should_enter_gap_avoid:
+            self._gap_enter_count += 1
+        else:
+            self._gap_enter_count = 0
+
+        if self._gap_enter_count >= self._config.gap_enter_consecutive_scans:
+            self._gap_enter_count = 0
+            self._gap_exit_count = 0
+            self._previous_mode = MissionMode.GAP_AVOID
+            return MissionMode.GAP_AVOID
+
+        self._gap_exit_count = 0
         self._previous_mode = MissionMode.TRACK
         return MissionMode.TRACK
 

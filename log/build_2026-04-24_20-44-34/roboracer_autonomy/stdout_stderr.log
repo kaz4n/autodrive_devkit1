@@ -1,0 +1,15 @@
+running develop
+running egg_info
+writing roboracer_autonomy.egg-info/PKG-INFO
+writing dependency_links to roboracer_autonomy.egg-info/dependency_links.txt
+writing entry points to roboracer_autonomy.egg-info/entry_points.txt
+writing requirements to roboracer_autonomy.egg-info/requires.txt
+writing top-level names to roboracer_autonomy.egg-info/top_level.txt
+reading manifest file 'roboracer_autonomy.egg-info/SOURCES.txt'
+writing manifest file 'roboracer_autonomy.egg-info/SOURCES.txt'
+running build_ext
+Creating /home/t31/test/ws_Comp/autodrive_devkit1/install/roboracer_autonomy/lib/python3.10/site-packages/roboracer-autonomy.egg-link (link to .)
+Installing autonomy_node script to /home/t31/test/ws_Comp/autodrive_devkit1/install/roboracer_autonomy/lib/roboracer_autonomy
+
+Installed /home/t31/test/ws_Comp/autodrive_devkit1/build/roboracer_autonomy
+running symlink_data

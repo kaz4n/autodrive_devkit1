@@ -84,6 +84,10 @@ class MissionConfig:
     safety_ttc_exit_s: float = 0.80
     safety_brake_hold_s: float = 0.30
     stale_cycles_before_brake: int = 5
+    gap_enter_angle_rad: float = 0.32
+    gap_exit_angle_rad: float = 0.20
+    gap_enter_consecutive_scans: int = 4
+    gap_exit_consecutive_scans: int = 8
     recovery_enabled: bool = False
     recovery_reverse_throttle: float = -0.15
     recovery_duration_s: float = 0.50
