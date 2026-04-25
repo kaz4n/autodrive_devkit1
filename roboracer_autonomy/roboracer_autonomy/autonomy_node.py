@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from collections import deque
+
 import numpy as np
 import rclpy
 from cv_bridge import CvBridge
@@ -30,8 +33,8 @@ class RoboRacerAutonomyNode(Node):
     def __init__(self) -> None:
         super().__init__('roboracer_autonomy')
         self.declare_parameter('use_camera', True)
-        self.declare_parameter('max_speed_mps', 100.0)
-        self.declare_parameter('control_hz', 800.0)
+        self.declare_parameter('max_speed_mps', 8.0)
+        self.declare_parameter('control_hz', 80.0)
         self.declare_parameter('raceline_csv_path', '')
         self.declare_parameter('external_pose_topic', '')
 
@@ -68,6 +71,31 @@ class RoboRacerAutonomyNode(Node):
         self._latest_external_pose: VehicleState | None = None
         self._last_mode = MissionMode.BOOTSTRAP
         self._last_camera_processing_stamp = 0.0
+        self._last_command_steering = 0.0
+        self._last_metrics_publish_stamp = 0.0
+        self._mode_enter_stamp = self._now()
+        self._mode_durations_s: dict[str, float] = {
+            MissionMode.BOOTSTRAP.value: 0.0,
+            MissionMode.LOCALIZE.value: 0.0,
+            MissionMode.RACE.value: 0.0,
+            MissionMode.AVOID.value: 0.0,
+            MissionMode.RECOVERY.value: 0.0,
+            MissionMode.SAFETY_BRAKE.value: 0.0,
+        }
+        self._mode_entry_count: dict[str, int] = {
+            MissionMode.BOOTSTRAP.value: 1,
+            MissionMode.LOCALIZE.value: 0,
+            MissionMode.RACE.value: 0,
+            MissionMode.AVOID.value: 0,
+            MissionMode.RECOVERY.value: 0,
+            MissionMode.SAFETY_BRAKE.value: 0,
+        }
+        self._tracking_error_samples = deque(maxlen=4000)
+        self._steering_derivative_samples = deque(maxlen=4000)
+        self._track_confidence_samples = deque(maxlen=4000)
+        self._centerline_points_samples = deque(maxlen=4000)
+        self._blocked_samples = deque(maxlen=4000)
+        self._speed_mae_samples = deque(maxlen=4000)
 
         prefix = '/autodrive/roboracer_1'
         self._pub_throttle_cmd = self.create_publisher(Float32, f'{prefix}/throttle_command', qos)
@@ -77,6 +105,7 @@ class RoboRacerAutonomyNode(Node):
         self._pub_mode = self.create_publisher(String, '/roboracer_autonomy/mission_mode', qos)
         self._pub_target_speed = self.create_publisher(Float32, '/roboracer_autonomy/target_speed', qos)
         self._pub_reference_source = self.create_publisher(String, '/roboracer_autonomy/reference_source', qos)
+        self._pub_tuning_metrics = self.create_publisher(String, '/roboracer_autonomy/tuning_metrics', qos)
 
         self.create_subscription(LaserScan, f'{prefix}/lidar', self._on_lidar, qos)
         self.create_subscription(Imu, f'{prefix}/imu', self._on_imu, qos)
@@ -224,6 +253,7 @@ class RoboRacerAutonomyNode(Node):
         mode = self._mission.decide(now, state, self._latest_lidar, self._latest_camera, self._heartbeats)
         self._latest_plan = self._planner.plan(state, self._latest_lidar, self._latest_camera, mode, now)
         command = self._controller.compute(self._latest_plan, state, now)
+        self._update_tuning_metrics(now, state, mode, command.steering)
         self._publish_control(command.throttle, command.steering)
         self._publish_debug(wheel_odom, state, mode)
 
@@ -252,6 +282,10 @@ class RoboRacerAutonomyNode(Node):
         self._pub_reference_source.publish(ref_msg)
 
         if mode != self._last_mode:
+            prev_mode = self._last_mode.value
+            self._mode_durations_s[prev_mode] += max(0.0, self._now() - self._mode_enter_stamp)
+            self._mode_enter_stamp = self._now()
+            self._mode_entry_count[mode.value] += 1
             self.get_logger().info(
                 f'Mode transition: {self._last_mode.value} -> {mode.value} | '
                 f'clearance={self._latest_lidar.forward_clearance:.2f} m | '
@@ -261,6 +295,68 @@ class RoboRacerAutonomyNode(Node):
                 f'pose_source={state.source}'
             )
             self._last_mode = mode
+
+    def _update_tuning_metrics(self, now: float, state: VehicleState, mode: MissionMode, steering_cmd: float) -> None:
+        if self._latest_plan.waypoints:
+            points = np.asarray([[wp.x, wp.y] for wp in self._latest_plan.waypoints], dtype=float)
+            deltas = points - np.asarray([state.x, state.y], dtype=float).reshape(1, 2)
+            tracking_error = float(np.min(np.linalg.norm(deltas, axis=1)))
+            self._tracking_error_samples.append(tracking_error)
+
+        dt = max(1e-3, 1.0 / self._control_hz)
+        steering_derivative = (float(steering_cmd) - float(self._last_command_steering)) / dt
+        self._steering_derivative_samples.append(float(steering_derivative))
+        self._last_command_steering = float(steering_cmd)
+
+        self._track_confidence_samples.append(float(self._latest_lidar.confidence))
+        self._centerline_points_samples.append(float(self._latest_lidar.centerline.shape[0]))
+        self._blocked_samples.append(1.0 if self._latest_lidar.blocked else 0.0)
+        self._speed_mae_samples.append(abs(float(self._latest_plan.target_speed) - float(state.speed)))
+
+        if self._last_metrics_publish_stamp <= 0.0:
+            self._last_metrics_publish_stamp = now
+            return
+        if now - self._last_metrics_publish_stamp < 1.0:
+            return
+
+        self._mode_durations_s[mode.value] += max(0.0, now - self._mode_enter_stamp)
+        self._mode_enter_stamp = now
+        metrics = {
+            'lap_time_s': None,
+            'lap_consistency_std_s': None,
+            'tracking_error_p95_m': self._pctl(self._tracking_error_samples, 95.0),
+            'steering_derivative_std': self._std(self._steering_derivative_samples),
+            'mode_entry_count': self._mode_entry_count,
+            'mode_duration_s': {k: round(v, 3) for k, v in self._mode_durations_s.items()},
+            'track_confidence_mean': self._mean(self._track_confidence_samples),
+            'track_confidence_p10': self._pctl(self._track_confidence_samples, 10.0),
+            'centerline_points_mean': self._mean(self._centerline_points_samples),
+            'centerline_points_p10': self._pctl(self._centerline_points_samples, 10.0),
+            'blocked_ratio': self._mean(self._blocked_samples),
+            'speed_mae_mps': self._mean(self._speed_mae_samples),
+        }
+        msg = String()
+        msg.data = json.dumps(metrics, separators=(',', ':'), sort_keys=True)
+        self._pub_tuning_metrics.publish(msg)
+        self._last_metrics_publish_stamp = now
+
+    @staticmethod
+    def _mean(values: deque) -> float:
+        if not values:
+            return 0.0
+        return float(np.mean(np.asarray(values, dtype=float)))
+
+    @staticmethod
+    def _std(values: deque) -> float:
+        if not values:
+            return 0.0
+        return float(np.std(np.asarray(values, dtype=float)))
+
+    @staticmethod
+    def _pctl(values: deque, p: float) -> float:
+        if not values:
+            return 0.0
+        return float(np.percentile(np.asarray(values, dtype=float), p))
 
     def _make_odom_msg(self, state: VehicleState, frame_id: str) -> Odometry:
         odom = Odometry()
