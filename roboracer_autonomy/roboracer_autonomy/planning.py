@@ -28,6 +28,8 @@ class TrajectoryPlanner:
         self._raceline_waypoints: List[Waypoint] = []
         self._raceline_points = np.zeros((0, 2), dtype=float)
         self._raceline_s = np.asarray([], dtype=float)
+        self._last_target_speed: float = 0.0
+        self._last_plan_stamp: float = 0.0
         if config.raceline_csv_path:
             self.load_raceline_csv(config.raceline_csv_path)
 
@@ -133,8 +135,13 @@ class TrajectoryPlanner:
             target_speed = min(target_speed, self._config.localize_mode_speed_mps)
         if mission_mode == MissionMode.SAFETY_BRAKE:
             target_speed = 0.0
-        if lidar.ttc < 0.35 or lidar.forward_clearance < 0.30:
-            target_speed = 0.0
+        target_speed = self._stabilize_target_speed(
+            target_speed=target_speed,
+            lidar=lidar,
+            mission_mode=mission_mode,
+            fallback_active=fallback_active,
+            stamp=stamp,
+        )
 
         confidence = clamp(
             0.65 * lidar.confidence + 0.35 * state.confidence,
@@ -354,13 +361,18 @@ class TrajectoryPlanner:
     ) -> float:
         target_speed = float(reference_speed)
         target_speed = min(target_speed, self._config.max_speed_mps)
-        clearance_speed = self._config.clearance_speed_gain * max(lidar.forward_clearance - 0.35, 0.0)
-        target_speed = min(target_speed, clearance_speed)
+        clearance_margin = 0.20
+        clearance_speed = self._config.clearance_speed_gain * max(lidar.forward_clearance - clearance_margin, 0.0)
+        if lidar.forward_clearance > 0.70 and lidar.ttc > 0.70:
+            clearance_floor = 1.20
+        else:
+            clearance_floor = 0.0
+        target_speed = min(target_speed, max(clearance_speed, clearance_floor))
 
-        clearance_risk = clamp((0.80 - lidar.forward_clearance) / 0.45, 0.0, 1.0)
-        ttc_risk = 0.0 if lidar.ttc == float('inf') else clamp((1.20 - lidar.ttc) / 0.75, 0.0, 1.0)
+        clearance_risk = clamp((0.60 - lidar.forward_clearance) / 0.35, 0.0, 1.0)
+        ttc_risk = 0.0 if lidar.ttc == float('inf') else clamp((0.85 - lidar.ttc) / 0.45, 0.0, 1.0)
         risk = max(clearance_risk, ttc_risk)
-        target_speed *= clamp(1.0 - 0.90 * (risk ** 1.5), 0.10, 1.0)
+        target_speed *= clamp(1.0 - 0.70 * (risk ** 1.35), 0.25, 1.0)
 
         if lidar.width_mean > 0.0 and lidar.width_mean < self._config.narrow_width_slowdown_m:
             target_speed *= 0.75
@@ -369,6 +381,49 @@ class TrajectoryPlanner:
         if mission_mode == MissionMode.SAFETY_BRAKE:
             target_speed = 0.0
         return float(clamp(target_speed, self._config.min_speed_mps, self._config.max_speed_mps))
+
+    def _stabilize_target_speed(
+        self,
+        *,
+        target_speed: float,
+        lidar: LidarObservation,
+        mission_mode: MissionMode,
+        fallback_active: bool,
+        stamp: float,
+    ) -> float:
+        if mission_mode == MissionMode.SAFETY_BRAKE:
+            self._last_target_speed = 0.0
+            self._last_plan_stamp = stamp
+            return 0.0
+
+        dt = stamp - self._last_plan_stamp if self._last_plan_stamp > 0.0 else 0.05
+        dt = clamp(dt, 0.01, 0.25)
+
+        alpha = clamp(self._config.speed_command_low_pass_alpha, 0.0, 1.0)
+        filtered = (1.0 - alpha) * self._last_target_speed + alpha * float(target_speed)
+
+        rise_step = max(self._config.speed_rise_limit_mps2, 0.0) * dt
+        fall_step = max(self._config.speed_fall_limit_mps2, 0.0) * dt
+        rate_limited = clamp(
+            filtered,
+            self._last_target_speed - fall_step,
+            self._last_target_speed + rise_step,
+        )
+
+        progress_allowed = (
+            mission_mode == MissionMode.RACE
+            and not fallback_active
+            and not lidar.blocked
+            and lidar.forward_clearance >= self._config.min_progress_clearance_m
+            and lidar.ttc >= self._config.min_progress_ttc_s
+        )
+        if progress_allowed:
+            rate_limited = max(rate_limited, self._config.min_progress_speed_mps)
+
+        stabilized = float(clamp(rate_limited, self._config.min_speed_mps, self._config.max_speed_mps))
+        self._last_target_speed = stabilized
+        self._last_plan_stamp = stamp
+        return stabilized
 
 
 ReactivePlanner = TrajectoryPlanner
