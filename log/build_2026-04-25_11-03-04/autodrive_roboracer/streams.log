@@ -1,0 +1,18 @@
+[1.035s] Invoking command in '/home/t31/test/ws_Comp/autodrive_devkit1/build/autodrive_roboracer': PYTHONPATH=/home/t31/test/ws_Comp/autodrive_devkit1/build/autodrive_roboracer/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/t31/test/ws_Comp/autodrive_devkit1/install/autodrive_roboracer/lib/python3.10/site-packages:${PYTHONPATH} VIRTUAL_ENV_PROMPT=(.venv) /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/t31/test/ws_Comp/autodrive_devkit1/build/autodrive_roboracer/build --no-deps symlink_data
+[1.278s] running develop
+[1.469s] running egg_info
+[1.470s] writing autodrive_roboracer.egg-info/PKG-INFO
+[1.470s] writing dependency_links to autodrive_roboracer.egg-info/dependency_links.txt
+[1.470s] writing entry points to autodrive_roboracer.egg-info/entry_points.txt
+[1.470s] writing requirements to autodrive_roboracer.egg-info/requires.txt
+[1.470s] writing top-level names to autodrive_roboracer.egg-info/top_level.txt
+[1.473s] reading manifest file 'autodrive_roboracer.egg-info/SOURCES.txt'
+[1.474s] writing manifest file 'autodrive_roboracer.egg-info/SOURCES.txt'
+[1.476s] running build_ext
+[1.476s] Creating /home/t31/test/ws_Comp/autodrive_devkit1/install/autodrive_roboracer/lib/python3.10/site-packages/autodrive-roboracer.egg-link (link to .)
+[1.479s] Installing autodrive_bridge script to /home/t31/test/ws_Comp/autodrive_devkit1/install/autodrive_roboracer/lib/autodrive_roboracer
+[1.479s] Installing teleop_keyboard script to /home/t31/test/ws_Comp/autodrive_devkit1/install/autodrive_roboracer/lib/autodrive_roboracer
+[1.479s] 
+[1.479s] Installed /home/t31/test/ws_Comp/autodrive_devkit1/build/autodrive_roboracer
+[1.479s] running symlink_data
+[1.519s] Invoked command in '/home/t31/test/ws_Comp/autodrive_devkit1/build/autodrive_roboracer' returned '0': PYTHONPATH=/home/t31/test/ws_Comp/autodrive_devkit1/build/autodrive_roboracer/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/t31/test/ws_Comp/autodrive_devkit1/install/autodrive_roboracer/lib/python3.10/site-packages:${PYTHONPATH} VIRTUAL_ENV_PROMPT=(.venv) /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/t31/test/ws_Comp/autodrive_devkit1/build/autodrive_roboracer/build --no-deps symlink_data
