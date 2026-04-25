@@ -24,3 +24,7 @@ Reactive autonomy stack for the AutoDRIVE RoboRacer competition.
 - `mission.py` — finite-state mission switching
 - `control.py` — steering conversion plus throttle PID
 - `autonomy_node.py` — ROS 2 node wiring
+
+## Tuning and performance evaluation
+
+Use `TUNING_GUIDE.md` for a structured tuning sequence, test matrix, and pass/fail criteria before pushing top speed.
