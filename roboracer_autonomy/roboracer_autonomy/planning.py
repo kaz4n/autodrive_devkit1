@@ -30,6 +30,12 @@ class TrajectoryPlanner:
         self._raceline_s = np.asarray([], dtype=float)
         self._last_target_speed: float = 0.0
         self._last_plan_stamp: float = 0.0
+        self._prefer_raceline: bool = True
+        self._raceline_invalid_count: int = 0
+        self._raceline_valid_count: int = 0
+        self._last_raceline_progress_s: Optional[float] = None
+        self._last_raceline_progress_stamp: float = 0.0
+        self._low_progress_since: float = 0.0
         if config.raceline_csv_path:
             self.load_raceline_csv(config.raceline_csv_path)
 
@@ -102,12 +108,21 @@ class TrajectoryPlanner:
             use_raceline = False
 
         if use_raceline:
-            waypoints = self._extract_global_window(state)
+            raceline_idx = nearest_point_index(self._raceline_points, np.asarray([state.x, state.y], dtype=float))
+            waypoints = self._extract_global_window_by_index(raceline_idx)
             source = 'raceline'
+            corridor_valid = True
             if waypoints and lidar.has_centerline() and lidar.confidence >= self._config.min_track_confidence:
-                if not self._corridor_is_valid(state, lidar, waypoints):
-                    waypoints = []
-                    source = 'none'
+                corridor_valid = self._corridor_is_valid(state, lidar, waypoints)
+            low_progress = self._update_raceline_progress(raceline_idx, stamp)
+            if not self._raceline_mode_allowed(corridor_valid, low_progress):
+                waypoints = []
+                source = 'none'
+        else:
+            self._prefer_raceline = True
+            self._raceline_invalid_count = 0
+            self._raceline_valid_count = 0
+            self._low_progress_since = 0.0
 
         if not waypoints and lidar.has_centerline() and lidar.confidence >= self._config.min_track_confidence:
             world_points = transform_points_local_to_world(lidar.centerline, state)
@@ -274,6 +289,11 @@ class TrajectoryPlanner:
             return []
         current_xy = np.asarray([state.x, state.y], dtype=float)
         idx = nearest_point_index(self._raceline_points, current_xy)
+        return self._extract_global_window_by_index(idx)
+
+    def _extract_global_window_by_index(self, idx: int) -> List[Waypoint]:
+        if not self.has_raceline:
+            return []
         n = len(self._raceline_waypoints)
         horizon = max(self._config.local_horizon_m, self._config.max_lookahead_m + 1.0)
         indices = [idx]
@@ -361,18 +381,10 @@ class TrajectoryPlanner:
     ) -> float:
         target_speed = float(reference_speed)
         target_speed = min(target_speed, self._config.max_speed_mps)
-        clearance_margin = 0.20
-        clearance_speed = self._config.clearance_speed_gain * max(lidar.forward_clearance - clearance_margin, 0.0)
-        if lidar.forward_clearance > 0.70 and lidar.ttc > 0.70:
-            clearance_floor = 1.20
-        else:
-            clearance_floor = 0.0
-        target_speed = min(target_speed, max(clearance_speed, clearance_floor))
-
-        clearance_risk = clamp((0.60 - lidar.forward_clearance) / 0.35, 0.0, 1.0)
-        ttc_risk = 0.0 if lidar.ttc == float('inf') else clamp((0.85 - lidar.ttc) / 0.45, 0.0, 1.0)
-        risk = max(clearance_risk, ttc_risk)
-        target_speed *= clamp(1.0 - 0.70 * (risk ** 1.35), 0.25, 1.0)
+        clearance_factor = clamp((lidar.forward_clearance - 0.30) / 1.30, 0.0, 1.0)
+        ttc_factor = 1.0 if lidar.ttc == float('inf') else clamp((lidar.ttc - 0.35) / 1.05, 0.0, 1.0)
+        safety_scale = min(clearance_factor, ttc_factor)
+        target_speed *= clamp(safety_scale, self._config.safety_speed_scale_min, 1.0)
 
         if lidar.width_mean > 0.0 and lidar.width_mean < self._config.narrow_width_slowdown_m:
             target_speed *= 0.75
@@ -381,6 +393,60 @@ class TrajectoryPlanner:
         if mission_mode == MissionMode.SAFETY_BRAKE:
             target_speed = 0.0
         return float(clamp(target_speed, self._config.min_speed_mps, self._config.max_speed_mps))
+
+    def _raceline_mode_allowed(self, corridor_valid: bool, low_progress: bool) -> bool:
+        if corridor_valid:
+            self._raceline_valid_count += 1
+            self._raceline_invalid_count = 0
+        else:
+            self._raceline_invalid_count += 1
+            self._raceline_valid_count = 0
+
+        if self._prefer_raceline:
+            if (
+                self._raceline_invalid_count >= self._config.raceline_invalid_cycles_before_fallback
+                and low_progress
+            ):
+                self._prefer_raceline = False
+        else:
+            if self._raceline_valid_count >= self._config.raceline_valid_cycles_before_rejoin:
+                self._prefer_raceline = True
+        return self._prefer_raceline
+
+    def _update_raceline_progress(self, raceline_idx: int, stamp: float) -> bool:
+        if self._raceline_s.size == 0 or raceline_idx < 0 or raceline_idx >= self._raceline_s.size:
+            self._low_progress_since = 0.0
+            return False
+
+        current_s = float(self._raceline_s[raceline_idx])
+        if self._last_raceline_progress_s is None or self._last_raceline_progress_stamp <= 0.0:
+            self._last_raceline_progress_s = current_s
+            self._last_raceline_progress_stamp = stamp
+            self._low_progress_since = 0.0
+            return False
+
+        dt = max(1e-3, stamp - self._last_raceline_progress_stamp)
+        ds = current_s - self._last_raceline_progress_s
+        if self._config.raceline_closed_loop and self._raceline_s.size >= 2:
+            total_len = float(self._raceline_s[-1])
+            if total_len > 1e-3 and ds < -0.5 * total_len:
+                ds += total_len
+        ds = max(0.0, ds)
+        progress_rate = ds / dt
+
+        self._last_raceline_progress_s = current_s
+        self._last_raceline_progress_stamp = stamp
+
+        if progress_rate < self._config.raceline_min_progress_mps:
+            if self._low_progress_since <= 0.0:
+                self._low_progress_since = stamp
+        else:
+            self._low_progress_since = 0.0
+
+        return (
+            self._low_progress_since > 0.0
+            and (stamp - self._low_progress_since) >= self._config.raceline_low_progress_timeout_s
+        )
 
     def _stabilize_target_speed(
         self,

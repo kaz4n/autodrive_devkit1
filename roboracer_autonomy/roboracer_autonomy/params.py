@@ -101,6 +101,11 @@ class PlannerConfig:
     avoid_min_progress_speed_mps: float = 0.70
     avoid_min_progress_clearance_m: float = 0.65
     avoid_min_progress_ttc_s: float = 0.75
+    raceline_invalid_cycles_before_fallback: int = 8
+    raceline_valid_cycles_before_rejoin: int = 6
+    raceline_low_progress_timeout_s: float = 0.70
+    raceline_min_progress_mps: float = 0.20
+    safety_speed_scale_min: float = 0.22
 
 
 @dataclass
