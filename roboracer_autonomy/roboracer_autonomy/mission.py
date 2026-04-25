@@ -11,8 +11,8 @@ class MissionManager:
         self._previous_mode = MissionMode.BOOTSTRAP
         self._safety_hold_until: float = 0.0
         self._stale_cycle_count: int = 0
-        self._gap_enter_count: int = 0
-        self._gap_exit_count: int = 0
+        self._avoid_enter_count: int = 0
+        self._avoid_exit_count: int = 0
 
     def decide(
         self,
@@ -31,7 +31,6 @@ class MissionManager:
                 self._safety_hold_until = now + self._config.safety_brake_hold_s
                 self._previous_mode = MissionMode.SAFETY_BRAKE
                 return MissionMode.SAFETY_BRAKE
-            # Debounce one-off stale samples to avoid brake jitter.
             return self._previous_mode
         self._stale_cycle_count = 0
 
@@ -47,7 +46,6 @@ class MissionManager:
             lidar.forward_clearance > self._config.safety_clearance_exit_m
             and lidar.ttc > self._config.safety_ttc_exit_s
         )
-
         if in_safety_zone:
             self._safety_hold_until = now + self._config.safety_brake_hold_s
             self._previous_mode = MissionMode.SAFETY_BRAKE
@@ -56,52 +54,48 @@ class MissionManager:
         if self._previous_mode == MissionMode.SAFETY_BRAKE and not safe_to_exit:
             self._previous_mode = MissionMode.SAFETY_BRAKE
             return MissionMode.SAFETY_BRAKE
-
         if now < self._safety_hold_until:
             self._previous_mode = MissionMode.SAFETY_BRAKE
             return MissionMode.SAFETY_BRAKE
 
-        should_enter_gap_avoid = (
-            lidar.blocked
-            or abs(lidar.gap_target_angle) > self._config.gap_enter_angle_rad
-        )
-        should_exit_gap_avoid = (
+        pose_ok = state.valid and state.confidence >= self._config.min_pose_confidence
+        track_ok = lidar.confidence >= self._config.min_track_confidence and lidar.centerline.shape[0] >= self._config.min_centerline_points
+
+        should_enter_avoid = lidar.blocked or not track_ok
+        should_exit_avoid = (
             not lidar.blocked
-            and abs(lidar.gap_target_angle) < self._config.gap_exit_angle_rad
+            and track_ok
             and lidar.forward_clearance > self._config.safety_clearance_exit_m
             and lidar.ttc > self._config.safety_ttc_exit_s
         )
 
-        if self._previous_mode == MissionMode.GAP_AVOID:
-            if should_exit_gap_avoid:
-                self._gap_exit_count += 1
+        if self._previous_mode == MissionMode.AVOID:
+            if should_exit_avoid:
+                self._avoid_exit_count += 1
             else:
-                self._gap_exit_count = 0
+                self._avoid_exit_count = 0
+            if self._avoid_exit_count >= self._config.avoid_exit_consecutive_scans:
+                self._avoid_exit_count = 0
+                self._avoid_enter_count = 0
+                self._previous_mode = MissionMode.RACE if pose_ok else MissionMode.LOCALIZE
+                return self._previous_mode
+            self._previous_mode = MissionMode.AVOID
+            return MissionMode.AVOID
 
-            if self._gap_exit_count >= self._config.gap_exit_consecutive_scans:
-                self._gap_exit_count = 0
-                self._gap_enter_count = 0
-                self._previous_mode = MissionMode.TRACK
-                return MissionMode.TRACK
-
-            self._gap_enter_count = 0
-            self._previous_mode = MissionMode.GAP_AVOID
-            return MissionMode.GAP_AVOID
-
-        if should_enter_gap_avoid:
-            self._gap_enter_count += 1
+        if should_enter_avoid:
+            self._avoid_enter_count += 1
         else:
-            self._gap_enter_count = 0
+            self._avoid_enter_count = 0
 
-        if self._gap_enter_count >= self._config.gap_enter_consecutive_scans:
-            self._gap_enter_count = 0
-            self._gap_exit_count = 0
-            self._previous_mode = MissionMode.GAP_AVOID
-            return MissionMode.GAP_AVOID
+        if self._avoid_enter_count >= self._config.avoid_enter_consecutive_scans:
+            self._avoid_enter_count = 0
+            self._avoid_exit_count = 0
+            self._previous_mode = MissionMode.AVOID
+            return MissionMode.AVOID
 
-        self._gap_exit_count = 0
-        self._previous_mode = MissionMode.TRACK
-        return MissionMode.TRACK
+        self._avoid_exit_count = 0
+        self._previous_mode = MissionMode.RACE if pose_ok else MissionMode.LOCALIZE
+        return self._previous_mode
 
     def _essential_sensors_fresh(self, now: float, heartbeats: SensorHeartbeat) -> bool:
         return (

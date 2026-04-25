@@ -1,7 +1,9 @@
-"""Reactive RoboRacer autonomy stack.
+"""Upgraded RoboRacer autonomy stack.
 
-This package keeps the runtime stack competition-legal by avoiding restricted IPS and odometry
-inputs during deployment. It combines encoder/IMU dead reckoning, LiDAR corridor and gap
-perception, camera edge cues, a finite-state mission manager, reactive path planning and
-pure-pursuit-style control with a speed PID.
+The stack is organized around a path-tracking pipeline instead of a purely reactive heading
+blender:
+
+wheel odometry prior -> optional external localization hook -> LiDAR track extraction ->
+trajectory planning / raceline tracking -> adaptive pure pursuit controller -> follow-the-gap
+fallback for blocked-path recovery.
 """
