@@ -92,6 +92,15 @@ class PlannerConfig:
     camera_stale_after_s: float = 0.15
     camera_stale_full_decay_s: float = 0.45
     camera_center_offset_gain: float = 0.15
+    speed_command_low_pass_alpha: float = 0.35
+    speed_rise_limit_mps2: float = 2.2
+    speed_fall_limit_mps2: float = 5.0
+    min_progress_speed_mps: float = 1.0
+    min_progress_clearance_m: float = 1.10
+    min_progress_ttc_s: float = 1.20
+    avoid_min_progress_speed_mps: float = 0.70
+    avoid_min_progress_clearance_m: float = 0.65
+    avoid_min_progress_ttc_s: float = 0.75
 
 
 @dataclass
@@ -123,6 +132,8 @@ class MissionConfig:
     safety_ttc_enter_s: float = 0.45
     safety_ttc_exit_s: float = 0.85
     safety_brake_hold_s: float = 0.30
+    safety_clearance_hard_m: float = 0.22
+    safety_ttc_hard_s: float = 0.25
     stale_cycles_before_brake: int = 5
     min_pose_confidence: float = 0.15
     min_track_confidence: float = 0.25

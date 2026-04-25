@@ -419,6 +419,13 @@ class TrajectoryPlanner:
         )
         if progress_allowed:
             rate_limited = max(rate_limited, self._config.min_progress_speed_mps)
+        avoid_progress_allowed = (
+            mission_mode == MissionMode.AVOID
+            and lidar.forward_clearance >= self._config.avoid_min_progress_clearance_m
+            and lidar.ttc >= self._config.avoid_min_progress_ttc_s
+        )
+        if avoid_progress_allowed:
+            rate_limited = max(rate_limited, self._config.avoid_min_progress_speed_mps)
 
         stabilized = float(clamp(rate_limited, self._config.min_speed_mps, self._config.max_speed_mps))
         self._last_target_speed = stabilized

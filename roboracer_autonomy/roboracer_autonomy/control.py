@@ -48,18 +48,10 @@ class AdaptivePurePursuitController:
             self._reset_pid(stamp)
             self._last_mode = plan.mode
 
-        if (
-            plan.mode == MissionMode.SAFETY_BRAKE
-            or plan.target_speed <= 0.05
-            or len(plan.waypoints) < 2
-            or not state.valid
-        ):
-            steering_hold = self._rate_limit(
-                self._last_steering,
-                0.0,
-                self._config.steering_rate_limit_per_s,
-                dt,
-            )
+        if plan.mode == MissionMode.SAFETY_BRAKE or len(plan.waypoints) < 2 or not state.valid:
+            # Hold the current steering in stop phases so the rack does not snap back to center
+            # between short braking/recovery transitions.
+            steering_hold = float(self._last_steering)
             self._cache(0.0, steering_hold, stamp)
             reason = 'safety_brake' if plan.mode == MissionMode.SAFETY_BRAKE else 'stop'
             return ControlCommand(
@@ -68,6 +60,17 @@ class AdaptivePurePursuitController:
                 steering=steering_hold,
                 emergency=(plan.mode == MissionMode.SAFETY_BRAKE),
                 reason=reason,
+            )
+
+        if plan.target_speed <= 0.05:
+            steering_hold = float(self._last_steering)
+            self._cache(0.0, steering_hold, stamp)
+            return ControlCommand(
+                stamp=stamp,
+                throttle=0.0,
+                steering=steering_hold,
+                emergency=False,
+                reason='coast_stop',
             )
 
         goal_xy, goal_speed, ref_curvature = self._select_goal(plan.waypoints, state, plan.lookahead)
