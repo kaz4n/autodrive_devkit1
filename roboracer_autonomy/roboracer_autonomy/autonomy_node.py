@@ -30,8 +30,8 @@ class RoboRacerAutonomyNode(Node):
     def __init__(self) -> None:
         super().__init__('roboracer_autonomy')
         self.declare_parameter('use_camera', True)
-        self.declare_parameter('max_speed_mps', 8.0)
-        self.declare_parameter('control_hz', 80.0)
+        self.declare_parameter('max_speed_mps', 100.0)
+        self.declare_parameter('control_hz', 800.0)
         self.declare_parameter('raceline_csv_path', '')
         self.declare_parameter('external_pose_topic', '')
 

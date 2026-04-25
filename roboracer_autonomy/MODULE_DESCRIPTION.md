@@ -185,8 +185,14 @@ For any path generated from points:
 #### Critical points
 - The planner always tries to return a **trajectory**, not a heading.
 - If a global raceline exists, it is validated against the local LiDAR corridor before use.
-- If localization or corridor agreement is poor, the planner falls back to the local centerline.
+- Corridor mismatch must persist (cycle hysteresis + low-progress timeout) before the planner leaves raceline mode.
+- If localization or corridor agreement remains poor, the planner falls back to the local centerline.
 - If even that fails, it falls back to FTG.
+
+#### Runtime stability updates
+- Target speed is temporally stabilized (low-pass + rise/fall rate limits).
+- Safety risk scales speed with a bounded multiplicative factor rather than hard clipping in nominal driving.
+- A minimum-progress floor is used in healthy `RACE`/`AVOID` contexts to reduce stop-go dithering.
 
 #### Raceline CSV format
 Accepted columns:
@@ -230,6 +236,7 @@ Contains `AdaptivePurePursuitController` and preserves `LowLevelController` as a
 - The steering loop now uses **measured steering feedback**, not just open-loop curvature.
 - The steering rate limit is set closer to the simulated actuator envelope.
 - PID is reset on mission-mode changes to avoid integral windup during safety events.
+- During stop/coast phases, steering holds the previous command instead of recentering, preserving steering continuity.
 
 #### Tunable knobs
 - `ControllerConfig.steering_kp`
@@ -268,7 +275,8 @@ Finite-state mission manager.
 #### Critical points
 - The mission manager now uses **path validity**, not gap angle, for normal behavior switching.
 - Hysteresis is applied to `AVOID` entry and exit.
-- Safety braking is based on TTC and clearance, with a hold timer.
+- Safety braking is based on TTC and clearance with hard/soft thresholds and a hold timer.
+- After hold expiry, `SAFETY_BRAKE` can transition into controlled `AVOID` crawl if hard-danger conditions clear.
 
 ---
 

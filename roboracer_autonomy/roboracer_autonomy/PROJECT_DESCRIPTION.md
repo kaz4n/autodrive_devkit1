@@ -160,6 +160,15 @@ If no valid raceline is available, the planner converts the LiDAR centerline int
 #### Source 3: gap fallback path
 If neither the global nor local path is usable, the planner generates a short constant-curvature recovery trajectory from FTG.
 
+### Persistence and hysteresis behavior
+The planner now uses persistence logic so it does not abandon the global raceline from single-frame LiDAR jitter:
+
+- corridor mismatch must persist for multiple cycles before fallback
+- low raceline progress must also persist for a minimum duration before fallback
+- after fallback, several valid corridor cycles are required before rejoining the raceline
+
+This keeps curve behavior smoother and reduces source-chatter (`raceline <-> local_centerline`).
+
 ### Speed profile generation
 For any path generated from points, the planner computes:
 
@@ -171,6 +180,8 @@ For any path generated from points, the planner computes:
 6. forward acceleration pass
 
 This is much better than deriving speed only from the instantaneous scan.
+
+Online safety scaling now applies as a bounded multiplicative factor on top of trajectory speed, plus temporal smoothing/rate-limiting of the commanded target speed. This keeps the raceline speed profile dominant while still respecting near-obstacle risk.
 
 ## 3.4 Mission logic: `mission.py`
 
@@ -187,10 +198,12 @@ Runs the behavior state machine.
 
 ### Main logic
 - stale sensor debounce
-- TTC and clearance safety brake
+- TTC and clearance safety brake (hard and soft thresholds)
 - hysteretic `AVOID` entry and exit
 - `LOCALIZE` when pose confidence is weak but tracking is still possible
 - `RACE` when the system is healthy
+
+The mission manager also allows a controlled transition from `SAFETY_BRAKE` to `AVOID` after the hold period when hard-danger conditions have cleared, preventing deadlock near barriers.
 
 ### Why this is better
 The old stack switched behavior mainly from gap angle and blockage. The new version switches behavior based on **path validity and safety state**, which is much more appropriate for a racing stack.
@@ -211,6 +224,8 @@ Tracks the trajectory produced by the planner.
 8. apply yaw-rate damping
 9. rate-limit steering
 10. track target speed with feedforward + PID
+
+When target speed drops to stop/coast conditions, the controller now holds the last steering command instead of recentering to zero, which prevents wheel-angle snapback during short stop-go transitions.
 
 ### Why this is better
 The controller now uses:

@@ -71,13 +71,13 @@ class PlannerConfig:
     require_external_pose_for_raceline: bool = False
     local_horizon_m: float = 8.0
     local_horizon_points: int = 35
-    max_speed_mps: float = 8.0
-    avoid_mode_speed_mps: float = 4.0
+    max_speed_mps: float = 15.0
+    avoid_mode_speed_mps: float = 8.0
     localize_mode_speed_mps: float = 1.5
-    min_speed_mps: float = 0.0
-    nominal_lookahead_m: float = 1.20
-    min_lookahead_m: float = 0.80
-    max_lookahead_m: float = 3.00
+    min_speed_mps: float = 0.5
+    nominal_lookahead_m: float = 3.20
+    min_lookahead_m: float = 0.05
+    max_lookahead_m: float = 8.00
     lookahead_speed_gain: float = 0.18
     lateral_accel_limit_mps2: float = 6.0
     max_brake_decel_mps2: float = 5.5
@@ -86,7 +86,7 @@ class PlannerConfig:
     narrow_width_slowdown_m: float = 1.15
     min_track_confidence: float = 0.28
     min_pose_confidence: float = 0.20
-    min_path_points: int = 8
+    min_path_points: int = 20
     corridor_validation_error_m: float = 0.70
     camera_confidence_threshold: float = 0.25
     camera_stale_after_s: float = 0.15
@@ -104,32 +104,32 @@ class PlannerConfig:
     raceline_invalid_cycles_before_fallback: int = 8
     raceline_valid_cycles_before_rejoin: int = 6
     raceline_low_progress_timeout_s: float = 0.70
-    raceline_min_progress_mps: float = 0.20
+    raceline_min_progress_mps: float = 0.90
     safety_speed_scale_min: float = 0.22
 
 
 @dataclass
 class ControllerConfig:
     steering_kp: float = 0.90
-    steering_kd: float = 0.10
-    steering_feedforward_gain: float = 1.00
-    steer_yaw_rate_damping: float = 0.08
+    steering_kd: float = 0.60
+    steering_feedforward_gain: float = 1.40
+    steer_yaw_rate_damping: float = 0.68
     throttle_kp: float = 0.25
     throttle_ki: float = 0.06
     throttle_kd: float = 0.015
     throttle_feedforward_gain: float = 0.16
     throttle_min: float = -0.30
     throttle_max: float = 1.00
-    throttle_rate_limit_per_s: float = 2.00
-    steering_rate_limit_per_s: float = 5.80
-    yaw_rate_low_pass_alpha: float = 0.30
+    throttle_rate_limit_per_s: float = 5.00
+    steering_rate_limit_per_s: float = 9.80
+    yaw_rate_low_pass_alpha: float = 0.70
     avoid_mode_throttle_cap: float = 0.55
 
 
 @dataclass
 class MissionConfig:
-    sensor_timeout_s: float = 0.35
-    steering_timeout_s: float = 0.60
+    sensor_timeout_s: float = 0.9
+    steering_timeout_s: float = 0.90
     camera_timeout_s: float = 0.45
     bootstrap_time_s: float = 0.20
     safety_clearance_enter_m: float = 0.35
