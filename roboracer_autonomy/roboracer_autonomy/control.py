@@ -59,7 +59,7 @@ class LowLevelController:
             throttle_target = min(throttle_target, 0.0)
         throttle = self._rate_limit(
             self._last_throttle,
-            clamp(throttle_target, -0.15, 1.0),
+            clamp(throttle_target, 0.0, 1.0),
             self._config.throttle_rate_limit_per_s,
             dt,
         )
