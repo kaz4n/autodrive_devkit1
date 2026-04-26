@@ -63,11 +63,11 @@ class PlannerConfig:
 
 @dataclass
 class ControllerConfig:
-    throttle_kp: float = 0.42  # Proportional throttle gain; increasing speeds error correction but may overshoot, decreasing is smoother but slower.
-    throttle_ki: float = 0.1  # Integral throttle gain for steady-state error; increasing removes bias faster but can wind up, decreasing reduces windup risk.
+    throttle_kp: float = 0.22  # Proportional throttle gain; increasing speeds error correction but may overshoot, decreasing is smoother but slower.
+    throttle_ki: float = 0.05  # Integral throttle gain for steady-state error; increasing removes bias faster but can wind up, decreasing reduces windup risk.
     throttle_kd: float = 0.02  # Derivative throttle damping; increasing damps transients/noise sensitivity, decreasing gives sharper but less damped response.
-    throttle_feedforward_gain: float = 0.58  # Feedforward throttle from target speed; increasing improves promptness but may over-command, decreasing relies more on PID feedback.
-    steer_yaw_rate_damping: float = 0.01  # Steering damping using yaw-rate feedback; increasing reduces oscillation but can feel sluggish, decreasing is more agile but may wobble.
+    throttle_feedforward_gain: float = 0.18  # Feedforward throttle from target speed; increasing improves promptness but may over-command, decreasing relies more on PID feedback.
+    steer_yaw_rate_damping: float = 0.08  # Steering damping using yaw-rate feedback; increasing reduces oscillation but can feel sluggish, decreasing is more agile but may wobble.
     throttle_rate_limit_per_s: float = 1.4  # Max throttle change per second; increasing allows snappier accel/brake transitions, decreasing smooths commands.
     steering_rate_limit_per_s: float = 4.0  # Max steering change rate; increasing turns wheel faster, decreasing softens steering dynamics.
 
