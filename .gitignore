@@ -4,35 +4,57 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
-# Build artifacts
-build/
-dist/
-*.so
-*.egg-info/
-
-# Logs
-*.log
-
-# Temporary files
-*.tmp
-*.swp
-
-# Environment files
-.env
-.env.local
-*.env.*
-
-# Editors
-.vscode/
-.idea/
-
-# Coverage reports
-coverage/
-htmlcov/
+.Python
+env/
+venv/
+.venv/
+.ENV
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
 .coverage
-
-# Testing
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+*.pot
+*.po
+*~
 .pytest_cache/
 .mypy_cache/
+
+# ROS/Robotics
+*.launch
+*.urdf
+*.xacro
+devel/
+install/
+build/
+log/
+
+# General
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+*.bak
+*.old
+*.orig
+*~
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Icon?
+iTunes_Control/
+Network Trash Folder/
+Temporary Items/
+Trashes
+VolumeIcon.icns
 ```
