@@ -29,8 +29,8 @@ class RoboRacerAutonomyNode(Node):
     def __init__(self) -> None:
         super().__init__('roboracer_autonomy')
         self.declare_parameter('use_camera', True)
-        self.declare_parameter('max_speed_mps', 4.0)
-        self.declare_parameter('control_hz', 1000.0)
+        self.declare_parameter('max_speed_mps', 7.0)
+        self.declare_parameter('control_hz', 3000.0)
 
         self._config = StackConfig()
         self._config.camera.enabled = bool(self.get_parameter('use_camera').value)
