@@ -1,3 +1,16 @@
+"""
+Headless bringup for RoboRacer autonomy stack.
+
+Key change vs original: mode parameter is now 'auto' by default, which means:
+  - First lap: gap-follow (disparity extender) while recording waypoints
+  - Subsequent laps: Pure Pursuit on the recorded centerline
+
+You can override:
+  mode:=gap           -> always use reactive gap-follow (safe but slower)
+  mode:=pure_pursuit  -> always use pure pursuit (requires pre-recorded waypoints)
+  mode:=auto          -> gap on lap 1, pure pursuit from lap 2 onward
+"""
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
@@ -6,18 +19,16 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    use_camera = LaunchConfiguration('use_camera')
     max_speed_mps = LaunchConfiguration('max_speed_mps')
     control_hz = LaunchConfiguration('control_hz')
-    external_pose_topic = LaunchConfiguration('external_pose_topic')
-    raceline_csv_path = LaunchConfiguration('raceline_csv_path')
+    mode = LaunchConfiguration('mode')
 
     return LaunchDescription([
-        DeclareLaunchArgument('use_camera', default_value='true'),
-        DeclareLaunchArgument('max_speed_mps', default_value='15.0'),
-        DeclareLaunchArgument('control_hz', default_value='80.0'),
-        DeclareLaunchArgument('external_pose_topic', default_value=''),
-        DeclareLaunchArgument('raceline_csv_path', default_value=''),
+        DeclareLaunchArgument('max_speed_mps', default_value='6.0'),
+        DeclareLaunchArgument('control_hz',    default_value='40.0'),
+        DeclareLaunchArgument('mode',          default_value='auto'),
+
+        # Bridge node: connects to AutoDRIVE Simulator via WebSocket
         Node(
             package='autodrive_roboracer',
             executable='autodrive_bridge',
@@ -25,6 +36,8 @@ def generate_launch_description():
             emulate_tty=True,
             output='screen',
         ),
+
+        # Autonomy node: disparity-extender + pure pursuit
         Node(
             package='roboracer_autonomy',
             executable='autonomy_node',
@@ -32,11 +45,10 @@ def generate_launch_description():
             emulate_tty=True,
             output='screen',
             parameters=[{
-                'use_camera': ParameterValue(use_camera, value_type=bool),
                 'max_speed_mps': ParameterValue(max_speed_mps, value_type=float),
-                'control_hz': ParameterValue(control_hz, value_type=float),
-                'external_pose_topic': ParameterValue(external_pose_topic, value_type=str),
-                'raceline_csv_path': ParameterValue(raceline_csv_path, value_type=str),
+                'control_hz':    ParameterValue(control_hz,    value_type=float),
+                'mode':          ParameterValue(mode,          value_type=str),
+                'vehicle_prefix': '/autodrive/roboracer_1',
             }],
         ),
     ])

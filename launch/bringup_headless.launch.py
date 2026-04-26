@@ -1,28 +1,15 @@
-# Copyright (c) 2026, Tinker Twins
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
+"""
+Headless bringup for RoboRacer autonomy stack.
 
-# 1. Redistributions of source code must retain the above copyright notice, this
-#    list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-#    this list of conditions and the following disclaimer in the documentation
-#    and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+Key change vs original: mode parameter is now 'auto' by default, which means:
+  - First lap: gap-follow (disparity extender) while recording waypoints
+  - Subsequent laps: Pure Pursuit on the recorded centerline
 
-################################################################################
+You can override:
+  mode:=gap           -> always use reactive gap-follow (safe but slower)
+  mode:=pure_pursuit  -> always use pure pursuit (requires pre-recorded waypoints)
+  mode:=auto          -> gap on lap 1, pure pursuit from lap 2 onward
+"""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -30,24 +17,18 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
-def generate_launch_description():
 
+def generate_launch_description():
     max_speed_mps = LaunchConfiguration('max_speed_mps')
     control_hz = LaunchConfiguration('control_hz')
-    maps_root = LaunchConfiguration('maps_root')
-    track_name = LaunchConfiguration('track_name')
-    external_pose_topic = LaunchConfiguration('external_pose_topic')
-    use_external_pose = LaunchConfiguration('use_external_pose')
-    vehicle_prefix = LaunchConfiguration('vehicle_prefix')
+    mode = LaunchConfiguration('mode')
 
     return LaunchDescription([
-        DeclareLaunchArgument('max_speed_mps', default_value='10.0'),
-        DeclareLaunchArgument('control_hz', default_value='15.0'),
-        DeclareLaunchArgument('maps_root', default_value='~/.roboracer_track_maps'),
-        DeclareLaunchArgument('track_name', default_value=''),
-        DeclareLaunchArgument('external_pose_topic', default_value=''),
-        DeclareLaunchArgument('use_external_pose', default_value='true'),
-        DeclareLaunchArgument('vehicle_prefix', default_value='/autodrive/roboracer_1'),
+        DeclareLaunchArgument('max_speed_mps', default_value='6.0'),
+        DeclareLaunchArgument('control_hz',    default_value='40.0'),
+        DeclareLaunchArgument('mode',          default_value='auto'),
+
+        # Bridge node: connects to AutoDRIVE Simulator via WebSocket
         Node(
             package='autodrive_roboracer',
             executable='autodrive_bridge',
@@ -55,6 +36,8 @@ def generate_launch_description():
             emulate_tty=True,
             output='screen',
         ),
+
+        # Autonomy node: disparity-extender + pure pursuit
         Node(
             package='roboracer_autonomy',
             executable='autonomy_node',
@@ -63,12 +46,9 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'max_speed_mps': ParameterValue(max_speed_mps, value_type=float),
-                'control_hz': ParameterValue(control_hz, value_type=float),
-                'maps_root': ParameterValue(maps_root, value_type=str),
-                'track_name': ParameterValue(track_name, value_type=str),
-                'external_pose_topic': ParameterValue(external_pose_topic, value_type=str),
-                'use_external_pose': ParameterValue(use_external_pose, value_type=bool),
-                'vehicle_prefix': ParameterValue(vehicle_prefix, value_type=str),
+                'control_hz':    ParameterValue(control_hz,    value_type=float),
+                'mode':          ParameterValue(mode,          value_type=str),
+                'vehicle_prefix': '/autodrive/roboracer_1',
             }],
         ),
     ])

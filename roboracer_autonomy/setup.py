@@ -6,7 +6,7 @@ package_name = 'roboracer_autonomy'
 
 setup(
     name=package_name,
-    version='0.1.0',
+    version='2.0.0',
     packages=[package_name],
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
@@ -15,9 +15,9 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='OpenAI',
-    maintainer_email='openai@example.com',
-    description='Competition-legal autonomy stack for AutoDRIVE RoboRacer',
+    maintainer='RoboRacer Team',
+    maintainer_email='team@example.com',
+    description='Competition-ready autonomy stack for AutoDRIVE RoboRacer - Disparity Extender + Pure Pursuit',
     license='MIT',
     tests_require=['pytest'],
     entry_points={
