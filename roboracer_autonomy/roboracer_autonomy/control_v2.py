@@ -182,6 +182,8 @@ class MPPIController:
             
             for step in range(self._num_steps):
                 # Bicycle model prediction
+                # Positive steering angle = turn left (positive curvature)
+                # curvature = tan(steer) / wheelbase
                 curvature = math.tan(rollout_steer) / self._wheelbase
                 rollout_yaw += rollout_v * curvature * self._config.dt
                 rollout_x += rollout_v * math.cos(rollout_yaw) * self._config.dt
@@ -233,13 +235,8 @@ class MPPIController:
         """Compute cost for a single trajectory step."""
         cost = 0.0
         
-        # Transform point to local frame for distance calculation
-        local_point = transform_points_world_to_local(
-            np.array([[x, y]]),
-            type('Pose', (), {'x': 0, 'y': 0, 'yaw': 0})()
-        )[0]
-        
         # Find closest point on reference path
+        min_dist = 0.0
         if path_points.shape[0] > 0:
             distances = np.linalg.norm(path_points - np.array([x, y]), axis=1)
             min_dist = np.min(distances)
@@ -251,11 +248,7 @@ class MPPIController:
         speed_error = v - target_speed
         cost += self._config.cost_speed_weight * speed_error ** 2
         
-        # Control smoothness cost (penalize aggressive inputs)
-        # This is implicit in the sampling but we can add explicit penalty
-        
-        # Collision cost (simplified - would use LiDAR data in full implementation)
-        # For now, penalize being too far from path (proxy for going off-track)
+        # Collision cost (simplified - penalize being too far from path)
         if path_points.shape[0] > 0 and min_dist > 1.5:
             cost += self._config.cost_collision_weight * (min_dist - 1.0) ** 2
         

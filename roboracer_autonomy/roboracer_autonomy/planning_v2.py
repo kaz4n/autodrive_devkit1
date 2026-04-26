@@ -365,13 +365,30 @@ class TrajectoryPlannerV2:
             self._config.local_horizon_m,
         )
         s_vals = np.linspace(0.30, horizon, self._config.local_horizon_points)
-        curvature = 2.0 * math.sin(target_heading) / max(self._config.nominal_lookahead_m, 0.75)
+        
+        # Curvature from target heading: positive heading = turn left (positive curvature)
+        # Using circular arc geometry: curvature = 2*sin(theta)/lookahead for small angles
+        lookahead = max(self._config.nominal_lookahead_m, 0.75)
+        curvature = 2.0 * math.sin(target_heading) / lookahead
+        
+        # Generate circular arc trajectory
         if abs(curvature) < 1e-4:
+            # Nearly straight path
             x_local = s_vals
-            y_local = np.tan(target_heading) * 0.20 * s_vals
+            y_local = np.tan(target_heading) * s_vals
         else:
-            x_local = np.sin(curvature * s_vals) / curvature
-            y_local = (1.0 - np.cos(curvature * s_vals)) / curvature
+            # Circular arc: x = sin(k*s)/k, y = (1-cos(k*s))/k for positive curvature (left turn)
+            radius = 1.0 / abs(curvature)
+            if curvature > 0:
+                # Left turn: arc curves upward (positive y)
+                x_local = radius * np.sin(s_vals / radius)
+                y_local = radius * (1.0 - np.cos(s_vals / radius))
+            else:
+                # Right turn: arc curves downward (negative y)
+                x_local = radius * np.sin(s_vals / radius)
+                y_local = -radius * (1.0 - np.cos(s_vals / radius))
+        
+        # Add bias based on lane position
         y_local += 0.15 * lidar.center_bias * (s_vals / max(horizon, 1e-3))
         local_points = np.column_stack((x_local, y_local)).astype(float)
         world_points = transform_points_local_to_world(local_points, state)
