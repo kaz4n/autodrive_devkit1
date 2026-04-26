@@ -1,49 +1,39 @@
 from __future__ import annotations
 
 import json
-from collections import deque
+from typing import Optional
 
 import numpy as np
 import rclpy
-from cv_bridge import CvBridge
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
-from sensor_msgs.msg import Image, Imu, JointState, LaserScan
+from sensor_msgs.msg import Imu, JointState, LaserScan
 from std_msgs.msg import Float32, String
 
-from .control import LowLevelController
-from .mission import MissionManager
-from .models import CameraObservation, LidarObservation, MissionMode, Plan, SensorHeartbeat, VehicleState
-from .params import StackConfig
-from .perception import CameraPerception, LidarPerception
-from .planning import ReactivePlanner
-from .state_estimator import SimpleStateEstimator
+from .free_space_mpc import FreeSpaceMPC
 from .math_utils import quaternion_to_yaw
+from .models import ControlCommand, SensorHeartbeat, TrackBoundaries, VehicleState
+from .params import StackConfig
+from .perception import LidarTrackExtractor
+from .state_estimator import WheelOdometryEstimator
 
 
 class RoboRacerAutonomyNode(Node):
-    """Path-centric RoboRacer autonomy stack.
-
-    Runtime inputs remain competition-legal: LiDAR, front camera, IMU, wheel encoders, and
-    steering feedback. A higher-level localizer can be connected through an optional custom pose
-    topic if it itself is built from legal sensors only.
-    """
-
     def __init__(self) -> None:
         super().__init__('roboracer_autonomy')
-        self.declare_parameter('use_camera', True)
-        self.declare_parameter('max_speed_mps', 8.0)
-        self.declare_parameter('control_hz', 80.0)
-        self.declare_parameter('raceline_csv_path', '')
+        self.declare_parameter('max_speed_mps', 10.0)
+        self.declare_parameter('control_hz', 15.0)
         self.declare_parameter('external_pose_topic', '')
+        self.declare_parameter('use_external_pose', False)
+        self.declare_parameter('vehicle_prefix', '/autodrive/roboracer_1')
 
         self._config = StackConfig()
-        self._config.camera.enabled = bool(self.get_parameter('use_camera').value)
-        self._config.planner.max_speed_mps = float(self.get_parameter('max_speed_mps').value)
-        self._config.planner.raceline_csv_path = str(self.get_parameter('raceline_csv_path').value)
+        self._config.mpc.max_speed_mps = float(self.get_parameter('max_speed_mps').value)
         self._config.localization.external_pose_topic = str(self.get_parameter('external_pose_topic').value)
+        self._config.localization.use_external_pose_if_available = bool(self.get_parameter('use_external_pose').value)
         self._control_hz = max(1.0, float(self.get_parameter('control_hz').value))
+        self._prefix = str(self.get_parameter('vehicle_prefix').value)
 
         qos = QoSProfile(
             reliability=QoSReliabilityPolicy.RELIABLE,
@@ -52,97 +42,62 @@ class RoboRacerAutonomyNode(Node):
             depth=1,
         )
 
-        self._bridge = CvBridge()
-        self._estimator = SimpleStateEstimator(self._config.vehicle, self._config.localization)
-        self._lidar = LidarPerception(self._config.lidar)
-        self._camera = CameraPerception(self._config.camera)
-        self._planner = ReactivePlanner(self._config.planner)
-        self._controller = LowLevelController(
-            self._config.vehicle,
-            self._config.controller,
-            nominal_max_speed_mps=self._config.planner.max_speed_mps,
+        self._estimator = WheelOdometryEstimator(self._config.vehicle, self._config.localization)
+        self._perception = LidarTrackExtractor(self._config.lidar)
+        self._mpc = FreeSpaceMPC(self._config.vehicle, self._config.mpc)
+
+        now = self._now()
+        self._heartbeats = SensorHeartbeat(
+            lidar_stamp=now,
+            imu_stamp=now,
+            left_encoder_stamp=now,
+            right_encoder_stamp=now,
+            steering_stamp=now,
+            external_pose_stamp=now,
         )
-        self._mission = MissionManager(self._config.mission)
+        self._latest_lidar = TrackBoundaries()
+        self._latest_external_pose: Optional[VehicleState] = None
+        self._last_command = ControlCommand()
+        self._solver_failure_count = 0
+        self._log_cycle_counter = 0
 
-        self._heartbeats = SensorHeartbeat()
-        self._latest_lidar = LidarObservation()
-        self._latest_camera = CameraObservation()
-        self._latest_plan = Plan()
-        self._latest_external_pose: VehicleState | None = None
-        self._last_mode = MissionMode.BOOTSTRAP
-        self._last_camera_processing_stamp = 0.0
-        self._last_command_steering = 0.0
-        self._last_metrics_publish_stamp = 0.0
-        self._mode_enter_stamp = self._now()
-        self._mode_durations_s: dict[str, float] = {
-            MissionMode.BOOTSTRAP.value: 0.0,
-            MissionMode.LOCALIZE.value: 0.0,
-            MissionMode.RACE.value: 0.0,
-            MissionMode.AVOID.value: 0.0,
-            MissionMode.RECOVERY.value: 0.0,
-            MissionMode.SAFETY_BRAKE.value: 0.0,
-        }
-        self._mode_entry_count: dict[str, int] = {
-            MissionMode.BOOTSTRAP.value: 1,
-            MissionMode.LOCALIZE.value: 0,
-            MissionMode.RACE.value: 0,
-            MissionMode.AVOID.value: 0,
-            MissionMode.RECOVERY.value: 0,
-            MissionMode.SAFETY_BRAKE.value: 0,
-        }
-        self._tracking_error_samples = deque(maxlen=4000)
-        self._steering_derivative_samples = deque(maxlen=4000)
-        self._track_confidence_samples = deque(maxlen=4000)
-        self._centerline_points_samples = deque(maxlen=4000)
-        self._blocked_samples = deque(maxlen=4000)
-        self._speed_mae_samples = deque(maxlen=4000)
-
-        prefix = '/autodrive/roboracer_1'
-        self._pub_throttle_cmd = self.create_publisher(Float32, f'{prefix}/throttle_command', qos)
-        self._pub_steering_cmd = self.create_publisher(Float32, f'{prefix}/steering_command', qos)
-        self._pub_pose_estimate = self.create_publisher(Odometry, '/roboracer_autonomy/pose_estimate', qos)
+        self._pub_throttle = self.create_publisher(Float32, f'{self._prefix}/throttle_command', qos)
+        self._pub_steering = self.create_publisher(Float32, f'{self._prefix}/steering_command', qos)
+        self._pub_pose = self.create_publisher(Odometry, '/roboracer_autonomy/pose_estimate', qos)
         self._pub_wheel_odom = self.create_publisher(Odometry, '/roboracer_autonomy/wheel_odom', qos)
-        self._pub_mode = self.create_publisher(String, '/roboracer_autonomy/mission_mode', qos)
-        self._pub_target_speed = self.create_publisher(Float32, '/roboracer_autonomy/target_speed', qos)
+        self._pub_track_id = self.create_publisher(String, '/roboracer_autonomy/track_id', qos)
+        self._pub_map_status = self.create_publisher(String, '/roboracer_autonomy/map_status', qos)
+        self._pub_controller_status = self.create_publisher(String, '/roboracer_autonomy/controller_status', qos)
         self._pub_reference_source = self.create_publisher(String, '/roboracer_autonomy/reference_source', qos)
-        self._pub_tuning_metrics = self.create_publisher(String, '/roboracer_autonomy/tuning_metrics', qos)
+        self._pub_target_speed = self.create_publisher(Float32, '/roboracer_autonomy/target_speed', qos)
 
-        self.create_subscription(LaserScan, f'{prefix}/lidar', self._on_lidar, qos)
-        self.create_subscription(Imu, f'{prefix}/imu', self._on_imu, qos)
-        self.create_subscription(JointState, f'{prefix}/left_encoder', self._on_left_encoder, qos)
-        self.create_subscription(JointState, f'{prefix}/right_encoder', self._on_right_encoder, qos)
-        self.create_subscription(Float32, f'{prefix}/steering', self._on_steering_feedback, qos)
-        if self._config.camera.enabled:
-            self.create_subscription(Image, f'{prefix}/front_camera', self._on_front_camera, qos)
+        self.create_subscription(LaserScan, f'{self._prefix}/lidar', self._on_lidar, qos)
+        self.create_subscription(Imu, f'{self._prefix}/imu', self._on_imu, qos)
+        self.create_subscription(JointState, f'{self._prefix}/left_encoder', self._on_left_encoder, qos)
+        self.create_subscription(JointState, f'{self._prefix}/right_encoder', self._on_right_encoder, qos)
+        self.create_subscription(Float32, f'{self._prefix}/steering', self._on_steering_feedback, qos)
         if self._config.localization.external_pose_topic:
-            self.create_subscription(
-                Odometry,
-                self._config.localization.external_pose_topic,
-                self._on_external_pose,
-                qos,
-            )
+            self.create_subscription(Odometry, self._config.localization.external_pose_topic, self._on_external_pose, qos)
 
         self.create_timer(1.0 / self._control_hz, self._control_loop)
         self.get_logger().info(
-            'RoboRacer autonomy stack ready. '
-            f'use_camera={self._config.camera.enabled}, '
-            f'max_speed_mps={self._config.planner.max_speed_mps:.2f}, '
+            'Free-space MPC stack ready. '
             f'control_hz={self._control_hz:.1f}, '
-            f'raceline_loaded={self._planner.has_raceline}, '
+            f'max_speed_mps={self._config.mpc.max_speed_mps:.2f}, '
             f'external_pose_topic={self._config.localization.external_pose_topic or "<none>"}'
         )
 
     def _now(self) -> float:
-        return self.get_clock().now().nanoseconds * 1e-9
+        return self.get_clock().now().nanoseconds * 1.0e-9
 
     @staticmethod
     def _stamp_to_seconds(msg_stamp) -> float:
-        return float(msg_stamp.sec) + float(msg_stamp.nanosec) * 1e-9
+        return float(msg_stamp.sec) + float(msg_stamp.nanosec) * 1.0e-9
 
     def _on_lidar(self, msg: LaserScan) -> None:
         stamp = self._stamp_to_seconds(msg.header.stamp) or self._now()
         speed = self._estimator.state.speed
-        self._latest_lidar = self._lidar.process(
+        self._latest_lidar = self._perception.process(
             np.asarray(msg.ranges, dtype=float),
             angle_min=float(msg.angle_min),
             angle_increment=float(msg.angle_increment),
@@ -183,20 +138,6 @@ class RoboRacerAutonomyNode(Node):
         self._estimator.update_steering(float(msg.data), stamp)
         self._heartbeats.steering_stamp = stamp
 
-    def _on_front_camera(self, msg: Image) -> None:
-        stamp = self._stamp_to_seconds(msg.header.stamp) or self._now()
-        if stamp - self._last_camera_processing_stamp < self._config.camera.process_period_s:
-            self._heartbeats.camera_stamp = stamp
-            return
-        try:
-            frame = self._bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
-        except Exception as exc:  # pragma: no cover
-            self.get_logger().warning(f'Camera conversion failed: {exc}')
-            return
-        self._latest_camera = self._camera.process(np.asarray(frame), stamp)
-        self._last_camera_processing_stamp = stamp
-        self._heartbeats.camera_stamp = stamp
-
     def _on_external_pose(self, msg: Odometry) -> None:
         stamp = self._stamp_to_seconds(msg.header.stamp) or self._now()
         yaw = quaternion_to_yaw(
@@ -221,142 +162,167 @@ class RoboRacerAutonomyNode(Node):
         )
         self._heartbeats.external_pose_stamp = stamp
 
-    def _select_state(self, now: float, wheel_odom: VehicleState) -> VehicleState:
+    def _select_pose(self, now: float, wheel_odom: VehicleState) -> VehicleState:
         ext = self._latest_external_pose
-        if (
-            ext is not None
-            and self._config.localization.use_external_pose_if_available
-            and now - ext.stamp <= self._config.localization.external_pose_timeout_s
-        ):
-            fused = VehicleState(
+        if ext is not None and self._config.localization.use_external_pose_if_available and now - ext.stamp <= self._config.localization.external_pose_timeout_s:
+            return VehicleState(
                 stamp=ext.stamp,
                 x=ext.x,
                 y=ext.y,
                 yaw=ext.yaw,
-                speed=wheel_odom.speed if abs(ext.speed) < 1e-6 else ext.speed,
-                yaw_rate=wheel_odom.yaw_rate if abs(ext.yaw_rate) < 1e-6 else ext.yaw_rate,
+                speed=wheel_odom.speed if abs(ext.speed) < 1.0e-6 else ext.speed,
+                yaw_rate=wheel_odom.yaw_rate if abs(ext.yaw_rate) < 1.0e-6 else ext.yaw_rate,
                 steering_angle=wheel_odom.steering_angle,
                 steering_normalized=wheel_odom.steering_normalized,
                 linear_accel_x=wheel_odom.linear_accel_x,
                 valid=True,
-                confidence=ext.confidence,
+                confidence=max(wheel_odom.confidence, ext.confidence),
                 source=ext.source,
-                covariance=ext.covariance,
             )
-            return fused
         return wheel_odom
 
     def _control_loop(self) -> None:
         now = self._now()
         wheel_odom = self._estimator.predict(now)
-        state = self._select_state(now, wheel_odom)
-        mode = self._mission.decide(now, state, self._latest_lidar, self._latest_camera, self._heartbeats)
-        self._latest_plan = self._planner.plan(state, self._latest_lidar, self._latest_camera, mode, now)
-        command = self._controller.compute(self._latest_plan, state, now)
-        self._update_tuning_metrics(now, state, mode, command.steering)
-        self._publish_control(command.throttle, command.steering)
-        self._publish_debug(wheel_odom, state, mode)
+        state = self._select_pose(now, wheel_odom)
 
-    def _publish_control(self, throttle: float, steering: float) -> None:
-        throttle_msg = Float32()
-        throttle_msg.data = float(throttle)
-        steering_msg = Float32()
-        steering_msg.data = float(steering)
-        self._pub_throttle_cmd.publish(throttle_msg)
-        self._pub_steering_cmd.publish(steering_msg)
+        if not state.valid:
+            command = self._immediate_brake(now, reason='state_unavailable')
+            self._last_command = command
+            self._publish_all(wheel_odom, state, command)
+            self._log_diagnostics(now)
+            return
 
-    def _publish_debug(self, wheel_odom: VehicleState, state: VehicleState, mode: MissionMode) -> None:
-        self._pub_pose_estimate.publish(self._make_odom_msg(state, frame_id='map' if state.source != 'wheel_odom' else 'roboracer_local'))
+        safety_cmd = self._precheck(now)
+        if safety_cmd is not None:
+            self._last_command = safety_cmd
+            self._publish_all(wheel_odom, state, safety_cmd)
+            self._log_diagnostics(now)
+            return
+
+        command = self._mpc.solve(
+            state,
+            self._latest_lidar.left_boundary,
+            self._latest_lidar.right_boundary,
+            stamp=now,
+        )
+        command = self._postcheck_solver_failures(command, now)
+        self._last_command = command
+        self._publish_all(wheel_odom, state, command)
+        self._log_diagnostics(now)
+
+    def _log_diagnostics(self, now: float) -> None:
+        self._log_cycle_counter += 1
+        log_interval = max(1, int(self._control_hz))
+        if self._log_cycle_counter % log_interval != 0:
+            return
+        
+        lidar_age = now - self._heartbeats.lidar_stamp
+        imu_age = now - self._heartbeats.imu_stamp
+        le_age = now - self._heartbeats.left_encoder_stamp
+        re_age = now - self._heartbeats.right_encoder_stamp
+        
+        self.get_logger().info(
+            f'DIAGNOSTICS: emergency={self._last_command.emergency} | '
+            f'reason={self._last_command.reason} | '
+            f'throttle={self._last_command.throttle:.3f} | '
+            f'steering={self._last_command.steering:.3f} | '
+            f'lidar_age_ms={lidar_age*1000:.1f} | '
+            f'imu_age_ms={imu_age*1000:.1f} | '
+            f'encoders_age_ms={max(le_age,re_age)*1000:.1f} | '
+            f'corridor_conf={self._latest_lidar.confidence:.2f} | '
+            f'clearance_m={self._latest_lidar.forward_clearance:.2f} | '
+            f'ttc_s={self._latest_lidar.ttc:.2f}'
+        )
+
+    def _precheck(self, now: float) -> Optional[ControlCommand]:
+        if now - self._heartbeats.lidar_stamp > self._config.mpc.stale_lidar_timeout_s:
+            return self._immediate_brake(now, reason='stale_lidar')
+        if self._latest_lidar.forward_clearance < self._config.mpc.emergency_clearance_m:
+            return self._immediate_brake(now, reason='hard_clearance')
+        if self._latest_lidar.ttc < self._config.mpc.emergency_ttc_s:
+            return self._immediate_brake(now, reason='hard_ttc')
+        if not self._latest_lidar.has_corridor():
+            return self._immediate_brake(now, reason='empty_corridor')
+        return None
+
+    def _postcheck_solver_failures(self, command: ControlCommand, now: float) -> ControlCommand:
+        solver_failure = command.emergency and command.reason in {
+            'solver_failure',
+            'solver_unavailable',
+            'invalid_corridor',
+            'weak_corridor',
+        }
+        if not solver_failure:
+            self._solver_failure_count = 0
+            return command
+
+        self._solver_failure_count += 1
+        command.metadata['consecutive_solver_failures'] = float(self._solver_failure_count)
+        command.steering = self._last_command.steering
+        command.target_speed = 0.0
+        if self._solver_failure_count >= self._config.mpc.fallback_hold_cycles:
+            command.throttle = self._config.mpc.fallback_brake_command
+        else:
+            command.throttle = 0.0
+        command.stamp = now
+        return command
+
+    def _immediate_brake(self, stamp: float, reason: str) -> ControlCommand:
+        self._solver_failure_count = 0
+        return ControlCommand(
+            stamp=stamp,
+            throttle=self._config.mpc.fallback_brake_command,
+            steering=self._last_command.steering,
+            target_speed=0.0,
+            emergency=True,
+            reason=reason,
+        )
+
+    def _publish_all(self, wheel_odom: VehicleState, state: VehicleState, command: ControlCommand) -> None:
+        throttle_msg = Float32(); throttle_msg.data = float(command.throttle)
+        steering_msg = Float32(); steering_msg.data = float(command.steering)
+        self._pub_throttle.publish(throttle_msg)
+        self._pub_steering.publish(steering_msg)
+
+        pose_frame = 'map' if state.source != 'wheel_odom' else 'roboracer_local'
+        self._pub_pose.publish(self._make_odom_msg(state, frame_id=pose_frame))
         self._pub_wheel_odom.publish(self._make_odom_msg(wheel_odom, frame_id='roboracer_local'))
 
-        mode_msg = String()
-        mode_msg.data = mode.value
-        self._pub_mode.publish(mode_msg)
+        track_msg = String(); track_msg.data = ''
+        self._pub_track_id.publish(track_msg)
 
-        speed_msg = Float32()
-        speed_msg.data = float(self._latest_plan.target_speed)
-        self._pub_target_speed.publish(speed_msg)
-
-        ref_msg = String()
-        ref_msg.data = self._latest_plan.reference_source
-        self._pub_reference_source.publish(ref_msg)
-
-        if mode != self._last_mode:
-            prev_mode = self._last_mode.value
-            self._mode_durations_s[prev_mode] += max(0.0, self._now() - self._mode_enter_stamp)
-            self._mode_enter_stamp = self._now()
-            self._mode_entry_count[mode.value] += 1
-            self.get_logger().info(
-                f'Mode transition: {self._last_mode.value} -> {mode.value} | '
-                f'clearance={self._latest_lidar.forward_clearance:.2f} m | '
-                f'ttc={self._latest_lidar.ttc:.2f} s | '
-                f'target_speed={self._latest_plan.target_speed:.2f} m/s | '
-                f'reference={self._latest_plan.reference_source} | '
-                f'pose_source={state.source}'
-            )
-            self._last_mode = mode
-
-    def _update_tuning_metrics(self, now: float, state: VehicleState, mode: MissionMode, steering_cmd: float) -> None:
-        if self._latest_plan.waypoints:
-            points = np.asarray([[wp.x, wp.y] for wp in self._latest_plan.waypoints], dtype=float)
-            deltas = points - np.asarray([state.x, state.y], dtype=float).reshape(1, 2)
-            tracking_error = float(np.min(np.linalg.norm(deltas, axis=1)))
-            self._tracking_error_samples.append(tracking_error)
-
-        dt = max(1e-3, 1.0 / self._control_hz)
-        steering_derivative = (float(steering_cmd) - float(self._last_command_steering)) / dt
-        self._steering_derivative_samples.append(float(steering_derivative))
-        self._last_command_steering = float(steering_cmd)
-
-        self._track_confidence_samples.append(float(self._latest_lidar.confidence))
-        self._centerline_points_samples.append(float(self._latest_lidar.centerline.shape[0]))
-        self._blocked_samples.append(1.0 if self._latest_lidar.blocked else 0.0)
-        self._speed_mae_samples.append(abs(float(self._latest_plan.target_speed) - float(state.speed)))
-
-        if self._last_metrics_publish_stamp <= 0.0:
-            self._last_metrics_publish_stamp = now
-            return
-        if now - self._last_metrics_publish_stamp < 1.0:
-            return
-
-        self._mode_durations_s[mode.value] += max(0.0, now - self._mode_enter_stamp)
-        self._mode_enter_stamp = now
-        metrics = {
-            'lap_time_s': None,
-            'lap_consistency_std_s': None,
-            'tracking_error_p95_m': self._pctl(self._tracking_error_samples, 95.0),
-            'steering_derivative_std': self._std(self._steering_derivative_samples),
-            'mode_entry_count': self._mode_entry_count,
-            'mode_duration_s': {k: round(v, 3) for k, v in self._mode_durations_s.items()},
-            'track_confidence_mean': self._mean(self._track_confidence_samples),
-            'track_confidence_p10': self._pctl(self._track_confidence_samples, 10.0),
-            'centerline_points_mean': self._mean(self._centerline_points_samples),
-            'centerline_points_p10': self._pctl(self._centerline_points_samples, 10.0),
-            'blocked_ratio': self._mean(self._blocked_samples),
-            'speed_mae_mps': self._mean(self._speed_mae_samples),
+        map_status = {
+            'map_mode': 'disabled',
+            'reference': 'free_space_mpc_live_corridor',
+            'live_confidence': float(self._latest_lidar.confidence),
         }
-        msg = String()
-        msg.data = json.dumps(metrics, separators=(',', ':'), sort_keys=True)
-        self._pub_tuning_metrics.publish(msg)
-        self._last_metrics_publish_stamp = now
+        map_status_msg = String(); map_status_msg.data = json.dumps(map_status, separators=(',', ':'), sort_keys=True)
+        self._pub_map_status.publish(map_status_msg)
 
-    @staticmethod
-    def _mean(values: deque) -> float:
-        if not values:
-            return 0.0
-        return float(np.mean(np.asarray(values, dtype=float)))
+        solver = self._mpc.last_solver_debug
+        ctrl_status = {
+            'controller': 'free_space_mpc',
+            'emergency': bool(command.emergency),
+            'reason': command.reason,
+            'solve_success': bool(solver.success),
+            'solve_time_ms': float(solver.solve_time_ms),
+            'solve_iterations': int(solver.iterations),
+            'target_speed_mps': float(command.target_speed),
+            'throttle_cmd': float(command.throttle),
+            'steering_cmd': float(command.steering),
+            'forward_clearance_m': float(self._latest_lidar.forward_clearance),
+            'ttc_s': float(self._latest_lidar.ttc),
+            'consecutive_solver_failures': int(self._solver_failure_count),
+            'reference': 'free_space_mpc_live_corridor',
+        }
+        ctrl_status_msg = String(); ctrl_status_msg.data = json.dumps(ctrl_status, separators=(',', ':'), sort_keys=True)
+        self._pub_controller_status.publish(ctrl_status_msg)
 
-    @staticmethod
-    def _std(values: deque) -> float:
-        if not values:
-            return 0.0
-        return float(np.std(np.asarray(values, dtype=float)))
-
-    @staticmethod
-    def _pctl(values: deque, p: float) -> float:
-        if not values:
-            return 0.0
-        return float(np.percentile(np.asarray(values, dtype=float), p))
+        ref_msg = String(); ref_msg.data = 'free_space_mpc_live_corridor'
+        self._pub_reference_source.publish(ref_msg)
+        target_speed_msg = Float32(); target_speed_msg.data = float(command.target_speed)
+        self._pub_target_speed.publish(target_speed_msg)
 
     def _make_odom_msg(self, state: VehicleState, frame_id: str) -> Odometry:
         odom = Odometry()

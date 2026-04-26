@@ -25,18 +25,52 @@
 ################################################################################
 
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
 
+    max_speed_mps = LaunchConfiguration('max_speed_mps')
+    control_hz = LaunchConfiguration('control_hz')
+    maps_root = LaunchConfiguration('maps_root')
+    track_name = LaunchConfiguration('track_name')
+    external_pose_topic = LaunchConfiguration('external_pose_topic')
+    use_external_pose = LaunchConfiguration('use_external_pose')
+    vehicle_prefix = LaunchConfiguration('vehicle_prefix')
+
     return LaunchDescription([
+        DeclareLaunchArgument('max_speed_mps', default_value='10.0'),
+        DeclareLaunchArgument('control_hz', default_value='15.0'),
+        DeclareLaunchArgument('maps_root', default_value='~/.roboracer_track_maps'),
+        DeclareLaunchArgument('track_name', default_value=''),
+        DeclareLaunchArgument('external_pose_topic', default_value=''),
+        DeclareLaunchArgument('use_external_pose', default_value='true'),
+        DeclareLaunchArgument('vehicle_prefix', default_value='/autodrive/roboracer_1'),
         Node(
             package='autodrive_roboracer',
             executable='autodrive_bridge',
             name='autodrive_bridge',
             emulate_tty=True,
             output='screen',
+        ),
+        Node(
+            package='roboracer_autonomy',
+            executable='autonomy_node',
+            name='roboracer_autonomy',
+            emulate_tty=True,
+            output='screen',
+            parameters=[{
+                'max_speed_mps': ParameterValue(max_speed_mps, value_type=float),
+                'control_hz': ParameterValue(control_hz, value_type=float),
+                'maps_root': ParameterValue(maps_root, value_type=str),
+                'track_name': ParameterValue(track_name, value_type=str),
+                'external_pose_topic': ParameterValue(external_pose_topic, value_type=str),
+                'use_external_pose': ParameterValue(use_external_pose, value_type=bool),
+                'vehicle_prefix': ParameterValue(vehicle_prefix, value_type=str),
+            }],
         ),
         Node(
             package='rviz2',

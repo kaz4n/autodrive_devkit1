@@ -7,6 +7,8 @@ resource/roboracer_autonomy
 roboracer_autonomy/__init__.py
 roboracer_autonomy/autonomy_node.py
 roboracer_autonomy/control.py
+roboracer_autonomy/free_space_mpc.py
+roboracer_autonomy/map_manager.py
 roboracer_autonomy/math_utils.py
 roboracer_autonomy/mission.py
 roboracer_autonomy/models.py

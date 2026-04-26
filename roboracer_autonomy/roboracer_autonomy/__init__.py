@@ -1,9 +1,15 @@
-"""Upgraded RoboRacer autonomy stack.
+"""RoboRacer free-space MPC stack.
 
-The stack is organized around a path-tracking pipeline instead of a purely reactive heading
-blender:
+Nominal autonomy path:
+    wheel odometry -> LiDAR corridor extraction -> free-space MPC -> throttle/steering
 
-wheel odometry prior -> optional external localization hook -> LiDAR track extraction ->
-trajectory planning / raceline tracking -> adaptive pure pursuit controller -> follow-the-gap
-fallback for blocked-path recovery.
+The old discrete mission/planning/control pipeline has been retired from the nominal loop.
+Compatibility shims remain only to avoid import breakage in older launch files.
 """
+
+__all__ = [
+    'RoboRacerAutonomyNode',
+    'FreeSpaceMPC',
+    'LidarTrackExtractor',
+    'WheelOdometryEstimator',
+]

@@ -1,324 +1,391 @@
-# Project Description: Path-Centric RoboRacer Autonomy Stack
+# Project Description: RoboRacer Free-Space MPC Stack with Automatic Multi-Track Mapping
 
 ## 1. Objective
 
-The goal of this refactor is to turn the original RoboRacer autonomy package from a **reactive heading controller** into a **trajectory-tracking racing stack** that is better suited to closed-loop time-attack racing.
+The goal of this package is to replace the old **reactive mission + planner + pure-pursuit** stack with a smoother and more continuous racing architecture built around a **free-space model predictive controller (MPC)**.
 
-The original stack could keep the vehicle alive, but it had structural limits:
+The new nominal runtime loop is:
 
-- it planned a scalar heading instead of a path
-- it used follow-the-gap too often as the main planner
-- it used dead reckoning as the main pose source
-- it mixed perception and planning in a way that amplified sensor jitter
-- it sent steering commands without a strong inner steering loop
+`wheel odometry prior -> LiDAR corridor extraction -> automatic multi-track map manager -> free-space MPC -> throttle / steering`
 
-The upgraded stack changes the architecture to:
+The design target is not only to keep the vehicle safe, but to make the car:
 
-`wheel odometry prior -> LiDAR boundary extraction -> centerline / raceline trajectory -> adaptive pure pursuit -> FTG fallback`
+- smoother in straight sections,
+- more predictive in curves,
+- less prone to stop-go mode chatter,
+- less dependent on hand-made logging laps,
+- and easier to retune for different tracks.
 
-It also adds a clean integration point for map-based localization and offline raceline loading.
+## 2. Architecture Summary
 
-## 2. Design goals
+### 2.1 State Estimation
 
-The upgrade was designed around five goals.
+**File:** `state_estimator.py`
 
-### Goal 1: Make the stack path-based
-The most important structural change is that the planner now outputs a **trajectory** rather than a heading. This allows the controller to track a path consistently instead of reacting to momentary scan geometry.
+This module provides a **competition-legal wheel-odometry prior** using only:
 
-### Goal 2: Keep the runtime stack competition-legal
-The package still directly consumes only:
+- IMU orientation and yaw-rate,
+- rear wheel encoders,
+- steering feedback.
 
-- LiDAR
-- front camera
-- IMU
-- wheel encoders
-- steering feedback
+It does not try to be a full SLAM or global localization solution. Instead, it serves as the fast local prior used by all downstream modules.
 
-An external pose estimate can be injected, but only through a custom topic that should itself be produced from legal sensors.
+### 2.2 Corridor Perception
 
-### Goal 3: Promote LiDAR to the primary racing sensor
-The LiDAR module now produces:
+**File:** `perception.py`
 
-- left boundary
-- right boundary
-- centerline
-- width estimate
-- blocked-path and clearance metrics
+This module converts raw LiDAR scans into a local geometric corridor:
 
-instead of only a gap target.
+- left boundary,
+- right boundary,
+- centerline,
+- width estimates,
+- heading hint,
+- curvature hint,
+- forward clearance,
+- TTC,
+- confidence.
 
-### Goal 4: Reserve FTG for emergencies
-Follow-the-gap is still included, but only as a fallback when:
+It also keeps an optional **gap-follow debug signal** for diagnostics, but gap-follow is no longer part of the nominal control loop.
 
-- the track model is weak
-- the path is blocked
-- no valid trajectory is available
+### 2.3 Automatic Multi-Track Mapping
 
-### Goal 5: Make future upgrades easier
-The new data model and planner/controller interfaces make it much easier to add:
+**File:** `map_manager.py`
 
-- scan-based localization
-- map-based raceline tracking
-- kinematic MPC
-- MPCC
-- learned camera perception
+This module gives the stack a lightweight mapping and localization capability without requiring a dedicated manual record lap.
 
-## 3. Module architecture
+It supports:
 
-## 3.1 State estimation: `state_estimator.py`
+- automatic track identification,
+- automatic track creation,
+- persistent on-disk map storage,
+- reloading multiple saved maps,
+- incremental map updates every run,
+- ICP-like pose correction against saved boundary clouds,
+- local map priors for corridor blending.
 
-### What it does
-This module now acts as a **wheel-odometry prior**, not the final localization layer.
+### 2.4 Continuous Free-Space MPC
 
-### Algorithm
-- steering feedback is converted from normalized actuator feedback to steering angle
-- left and right wheel speeds are estimated from encoder angle deltas
-- IMU yaw and yaw-rate are fused with bicycle-model prediction
-- the pose is propagated with wheelbase-aware kinematics
-- a confidence score is produced and decayed over time
+**File:** `free_space_mpc.py`
 
-### Why this is better
-The previous estimator behaved more like a light dead-reckoner without a proper bicycle-model yaw update. The new version is a better prior for both:
+This is the nominal controller. It directly outputs:
 
-- local trajectory tracking
-- future scan-based localization
+- `throttle`
+- `steering`
 
-### Critical implementation detail
-The simulator steering feedback topic is normalized, not directly an angle in radians. Interpreting it as radians can materially degrade steering prediction.
+It no longer depends on:
 
-## 3.2 Perception: `perception.py`
+- a discrete mission manager,
+- a separate planner node,
+- a pure-pursuit controller.
 
-### 3.2.1 LiDAR track extraction
+Instead, it predicts the vehicle state over a short horizon inside the live LiDAR corridor, optionally blended with a local map prior.
 
-#### What it does
-Converts the scan into a local track model.
+### 2.5 Minimal Safety Layer
 
-#### Algorithm
-1. clip and smooth the scan
-2. convert each range sample into local XY
-3. split points into left and right sets
-4. bin points by forward distance
-5. pick the closest border point in each bin
-6. smooth the border traces
-7. form a centerline from both borders or from one border plus a width estimate
-8. compute confidence, width statistics, heading hint, curvature hint, TTC, and blockage
+**File:** `mission.py`
 
-#### Why this is better
-A racing controller wants a **stable corridor**, not an instantaneous gap angle. Binned boundaries and a smoothed centerline are much more stable inputs to a controller.
+Despite the filename, this module is **not a mission FSM**. It is only a minimal safety monitor. It handles:
 
-### 3.2.2 Gap fallback
+- stale LiDAR,
+- hard clearance violations,
+- hard TTC violations,
+- repeated MPC emergency/failure cycles.
 
-#### What it does
-Provides emergency steering when the normal path source becomes unreliable.
+Its job is to prevent unsafe commands, not to switch between nominal driving modes.
 
-#### Algorithm
-- classic follow-the-gap bubble masking
-- largest-gap search
-- target selection with continuity penalty
+### 2.6 ROS 2 Integration
 
-#### Why it remains in the stack
-FTG is still valuable for:
-- obstacle avoidance
-- recovery behavior
-- degraded perception conditions
+**File:** `autonomy_node.py`
 
-It is simply no longer the main planner.
+This node wires together all components and publishes:
 
-### 3.2.3 Camera auxiliary perception
+- throttle command,
+- steering command,
+- pose estimate,
+- wheel odometry,
+- track id,
+- map status,
+- controller status,
+- reference source,
+- target speed.
 
-#### What it does
-Extracts weak boundary cues from the forward camera.
+## 3. Detailed Algorithm by Module
 
-#### Algorithm
-- ROI crop
-- grayscale + Gaussian blur
-- Canny edges
-- probabilistic Hough transform
-- left/right line fitting
-- estimate center offset and heading error
+## 3.1 `state_estimator.py`
 
-#### Role in the system
-The camera is intentionally kept **secondary**. It is used to bias fallback behavior and support LiDAR when track confidence drops.
-
-## 3.3 Planning: `planning.py`
-
-### What it does
-Produces a local trajectory suitable for path tracking.
-
-### Planning hierarchy
-The planner supports three path sources in priority order.
-
-#### Source 1: global raceline
-If a raceline CSV is provided and pose quality is good, the planner:
-- finds the nearest raceline station
-- extracts a local horizon window
-- validates it against the local LiDAR corridor
-
-#### Source 2: local centerline
-If no valid raceline is available, the planner converts the LiDAR centerline into world coordinates and uses that as the local path.
-
-#### Source 3: gap fallback path
-If neither the global nor local path is usable, the planner generates a short constant-curvature recovery trajectory from FTG.
-
-### Persistence and hysteresis behavior
-The planner now uses persistence logic so it does not abandon the global raceline from single-frame LiDAR jitter:
-
-- corridor mismatch must persist for multiple cycles before fallback
-- low raceline progress must also persist for a minimum duration before fallback
-- after fallback, several valid corridor cycles are required before rejoining the raceline
-
-This keeps curve behavior smoother and reduces source-chatter (`raceline <-> local_centerline`).
-
-### Speed profile generation
-For any path generated from points, the planner computes:
-
-1. arc length
-2. heading
-3. curvature
-4. curvature-limited speed
-5. backward braking pass
-6. forward acceleration pass
-
-This is much better than deriving speed only from the instantaneous scan.
-
-Online safety scaling now applies as a bounded multiplicative factor on top of trajectory speed, plus temporal smoothing/rate-limiting of the commanded target speed. This keeps the raceline speed profile dominant while still respecting near-obstacle risk.
-
-## 3.4 Mission logic: `mission.py`
-
-### What it does
-Runs the behavior state machine.
-
-### Modes
-- `BOOTSTRAP`
-- `LOCALIZE`
-- `RACE`
-- `AVOID`
-- `RECOVERY`
-- `SAFETY_BRAKE`
-
-### Main logic
-- stale sensor debounce
-- TTC and clearance safety brake (hard and soft thresholds)
-- hysteretic `AVOID` entry and exit
-- `LOCALIZE` when pose confidence is weak but tracking is still possible
-- `RACE` when the system is healthy
-
-The mission manager also allows a controlled transition from `SAFETY_BRAKE` to `AVOID` after the hold period when hard-danger conditions have cleared, preventing deadlock near barriers.
-
-### Why this is better
-The old stack switched behavior mainly from gap angle and blockage. The new version switches behavior based on **path validity and safety state**, which is much more appropriate for a racing stack.
-
-## 3.5 Control: `control.py`
-
-### What it does
-Tracks the trajectory produced by the planner.
+### Role
+A fast prior pose estimate for control and scan-to-map refinement.
 
 ### Algorithm
-1. find the nearest point on the current trajectory
-2. select a goal point at the dynamic lookahead distance
-3. transform that goal into the vehicle frame
-4. compute pure-pursuit curvature
-5. blend it with the reference path curvature
-6. convert to desired steering angle
-7. apply steering feedforward and steering feedback
-8. apply yaw-rate damping
-9. rate-limit steering
-10. track target speed with feedforward + PID
 
-When target speed drops to stop/coast conditions, the controller now holds the last steering command instead of recentering to zero, which prevents wheel-angle snapback during short stop-go transitions.
+1. Steering feedback is interpreted as a normalized actuator value in `[-1, 1]`.
+2. It is converted to a physical steering angle using `max_steer_angle_rad`.
+3. Rear wheel speeds are estimated from encoder angle differences.
+4. IMU yaw and yaw-rate are fused into the local state.
+5. A bicycle-model prediction updates:
+   - `x`,
+   - `y`,
+   - `yaw`,
+   - `speed`,
+   - `steering_angle`.
+6. Confidence is decayed over time if fresh sensor updates stop arriving.
 
-### Why this is better
-The controller now uses:
-- a real trajectory
-- dynamic lookahead
-- steering feedback
-- rate-limited steering
-- a proper inner steering correction term
+### Critical implementation points
 
-instead of only commanding curvature from a reactive heading.
+- Steering feedback must be treated as **normalized steering**, not raw radians.
+- Encoder deltas must be unwrapped correctly to avoid sign flips.
+- This estimator is a **prior**, not the final truth.
 
-## 3.6 ROS 2 integration: `autonomy_node.py`
+## 3.2 `perception.py`
 
-### What it does
-Connects the upgraded modules to the simulator topics and publishes commands and debug outputs.
+### Role
+Turn raw LiDAR into a corridor model the MPC can optimize inside.
 
-### Published interfaces
-- `/roboracer_autonomy/pose_estimate`
-- `/roboracer_autonomy/wheel_odom`
-- `/roboracer_autonomy/mission_mode`
-- `/roboracer_autonomy/target_speed`
-- `/roboracer_autonomy/reference_source`
+### Algorithm
 
-### Key runtime feature
-An optional `external_pose_topic` can be supplied for legal map-based localization without changing the rest of the stack.
+1. Clip invalid ranges into configured min/max limits.
+2. Smooth the range array with a moving average.
+3. Fill short “leaks” in the scan so tiny missing segments do not break wall continuity.
+4. Convert ranges into local `(x, y)` points.
+5. Keep only forward/focus points within lookahead and view limits.
+6. Extract left and right boundaries by binning in `x` and selecting the closest valid side sample.
+7. Reject side jumps that exceed the side outlier threshold.
+8. Build a centerline from the two boundaries or from a width estimate if only one side is visible.
+9. Smooth the centerline and blend it slightly with the previous one for temporal continuity.
+10. Compute:
+    - `heading_hint`,
+    - `curvature_hint`,
+    - `forward_clearance`,
+    - `ttc`,
+    - `confidence`.
 
-## 4. Why this stack should perform better
+### Critical implementation points
 
-The expected gains come from structural improvements, not from cosmetic tuning.
+- `x_bin_size_m` trades spatial detail for stability.
+- `smoothing_kernel` and `centerline_smoothing_window` strongly affect straight-line smoothness.
+- `side_outlier_jump_m` determines whether the extracted walls are robust or noisy.
+- Corridor confidence matters indirectly because weak corridors reduce map updates and can force MPC fallback.
 
-### 4.1 Less steering jitter
-Boundary fitting and centerline smoothing reduce scan-to-scan path jumps.
+## 3.3 `map_manager.py`
 
-### 4.2 Better cornering behavior
-The controller follows a path with a speed profile instead of reacting to a single heading error.
+### Role
+Auto-build and reuse maps across repeated runs and across multiple tracks.
 
-### 4.3 Less mode chatter
-Mission logic now uses hysteresis and path validity instead of reacting directly to ordinary corner geometry.
+### Algorithm
 
-### 4.4 Better use of steering bandwidth
-The controller uses steering feedback and a faster rate limit closer to the actuator capability.
+1. Build a compact fingerprint from the current LiDAR observation.
+2. Compare it to saved track fingerprints.
+3. If a similar track exists, activate it.
+4. Otherwise, auto-create a new track record.
+5. Transform local observed boundaries into world coordinates using the current pose estimate.
+6. Voxel-downsample the accumulated point cloud.
+7. Periodically save map data to disk.
+8. When enough saved map points exist, run a lightweight ICP-like least-squares correction to refine pose.
+9. Reproject the active map back into the local vehicle frame to generate a **map prior corridor**.
 
-### 4.5 Better upgrade path
-The system is now naturally compatible with:
-- SLAM and map localization
-- offline raceline generation
-- MPC / MPCC
+### Critical implementation points
 
-## 5. What is already implemented vs. what is left as an integration hook
+- `fingerprint_similarity_threshold` controls whether the wrong map gets reused.
+- `icp_inlier_distance_m`, `icp_max_translation_m`, and `icp_max_yaw_rad` control localization aggressiveness.
+- `min_map_points_for_localization` and `min_map_points_for_prior` decide how quickly map refinement activates.
+- `use_map_prior_weight` in the MPC determines how much the controller trusts this saved map.
 
-### Already implemented
-- wheel-odometry prior
-- LiDAR boundary extraction
-- centerline generation
-- local trajectory planning
-- optional raceline CSV loading
-- adaptive pure pursuit tracking
-- FTG fallback
-- path-validity mission logic
-- optional external pose hook
-- module-level documentation
+## 3.4 `free_space_mpc.py`
 
-### Left as an integration hook
-- actual SLAM / AMCL / scan matcher node
-- offline raceline optimization tool
-- kinematic MPC / MPCC controller
-- learned camera segmentation or obstacle detector
+### Role
+Generate direct throttle and steering commands continuously from the corridor.
 
-These were not forced into this code package because they normally depend on additional ROS packages, optimization solvers, or datasets.
+### Internal model
+The controller uses a **kinematic bicycle model** with state:
 
-## 6. Tuning philosophy
+- `x`
+- `y`
+- `yaw`
+- `speed`
+- `steering angle`
 
-Tuning should be done in this order:
+and controls:
 
-1. steering feedback interpretation and odometry prior
-2. LiDAR boundary extraction
-3. pure pursuit lookahead
-4. speed profile limits
-5. safety thresholds
-6. steering bandwidth
-7. external localization
-8. MPC, if desired
+- longitudinal acceleration,
+- steering-rate.
 
-Trying to tune the controller before the centerline is stable or before steering feedback is interpreted correctly will waste a lot of time.
+### Corridor construction
 
-## 7. High-ceiling future plan
+1. Sample an `x_grid` ahead of the car.
+2. Interpolate live left/right wall positions onto that grid.
+3. If a map prior is available, blend it into the live boundaries.
+4. Fill missing sides using the current width estimate.
+5. Compute:
+   - centerline profile,
+   - heading reference,
+   - curvature reference,
+   - speed reference from lateral acceleration limits.
 
-The next best competitive configuration is:
+### Optimization strategy
 
-- map build with SLAM
-- scan-based localization
-- saved raceline CSV
-- this upgraded planner/controller stack
-- later swap pure pursuit for kinematic MPC or MPCC
+1. Parameterize control with a small number of knots.
+2. Expand knots to a full control sequence over the horizon.
+3. Simulate the vehicle forward.
+4. Minimize a cost that includes:
+   - lateral error,
+   - heading error,
+   - speed tracking error,
+   - steering-rate penalty,
+   - steering magnitude penalty,
+   - acceleration penalty,
+   - boundary violation penalty,
+   - input smoothness penalty,
+   - terminal lateral error,
+   - progress reward.
+5. Solve with SciPy `minimize` when available.
+6. Warm-start each solve with the shifted previous solution.
+7. If the solver fails, fall back to a lightweight geometric heuristic.
 
-That keeps the current code useful while moving toward a genuinely high-performance racing system.
+### Critical implementation points
+
+- `horizon_steps` and `control_knots` are the biggest performance-vs-reactivity knobs.
+- `w_progress` pushes the car forward; too much makes the car aggressive.
+- `w_boundary` and `corridor_margin_m` define how strongly the car avoids walls.
+- `w_steer_rate`, `w_input_smooth`, and `w_steer_abs` determine steering continuity.
+- `lateral_accel_limit_mps2` shapes corner speed.
+
+## 3.5 `mission.py` / Safety monitor
+
+### Role
+A thin safety filter around the nominal controller.
+
+### Behavior
+
+Precheck:
+
+- brake if LiDAR is stale,
+- brake if hard clearance is violated,
+- brake if hard TTC is violated.
+
+Postcheck:
+
+- if the MPC keeps failing repeatedly, hold the current steering and apply fallback braking.
+
+### Critical implementation points
+
+- `stale_lidar_timeout_s` must be larger than your actual worst-case LiDAR delay.
+- `fallback_hold_cycles` determines how tolerant the stack is to short solver hiccups.
+- This layer is intentionally small; it should not become another hidden planner.
+
+## 3.6 `autonomy_node.py`
+
+### Role
+Main runtime orchestration.
+
+### Runtime flow
+
+1. Read sensors.
+2. Update wheel odometry.
+3. Optionally select external pose if configured and fresh.
+4. Run safety precheck.
+5. Run corridor extraction.
+6. Run map localization/refinement and update the active map.
+7. Build local map prior.
+8. Solve MPC.
+9. Run safety postcheck.
+10. Publish control and debug messages.
+
+### Critical implementation points
+
+- Debug topics are essential for tuning. The controller status and map status topics should be logged on every run.
+- `control_hz` must match the actual solver budget.
+
+## 4. Why This Stack Is Better Than the Old One
+
+The old discrete stack had three structural problems:
+
+1. It mixed perception, planning, and safety into discrete modes.
+2. It used geometric tracking instead of predictive control.
+3. It had no integrated notion of corridor continuity and only weak map reuse.
+
+This stack addresses those problems by:
+
+- removing nominal mode switching,
+- using direct MPC instead of pure pursuit,
+- building a reusable map automatically,
+- blending live perception with prior track structure,
+- producing continuous steering and throttle.
+
+## 5. Best-Practice Operating Rules
+
+### 5.1 Start simple, then add speed
+
+Always begin tuning at modest speed and conservative acceleration limits. A fast unstable stack is much harder to debug than a slower stable one.
+
+### 5.2 Tune in this order
+
+1. wheel odometry consistency,
+2. LiDAR corridor quality,
+3. map association and ICP,
+4. MPC smoothness,
+5. corner speed,
+6. straight-line speed,
+7. emergency thresholds.
+
+### 5.3 Do not tune everything at once
+
+Change one parameter family at a time:
+
+- perception,
+- localization/map,
+- MPC cost,
+- vehicle limits,
+- safety thresholds.
+
+### 5.4 Log the right topics
+
+For every test run, log:
+
+- `controller_status`
+- `map_status`
+- `pose_estimate`
+- `wheel_odom`
+- `target_speed`
+- raw LiDAR scan
+
+### 5.5 Treat map priors carefully
+
+A good map prior improves continuity.
+A wrong map prior creates systematic steering errors.
+
+If the car suddenly becomes consistently biased to one side after the first lap, suspect:
+
+- wrong track selection,
+- overly permissive fingerprint matching,
+- ICP over-correction,
+- too much `use_map_prior_weight`.
+
+## 6. Recommended Future Upgrades
+
+This implementation is already a large step forward, but the cleanest future upgrades are:
+
+- replace the SciPy optimizer with CasADi/acados,
+- replace the lightweight map manager with a stronger SLAM/localization backend,
+- add a bounded reverse-recovery primitive for dead-end cases,
+- add learned camera priors only after the LiDAR pipeline is stable,
+- optionally add a raceline layer on top of the map for outright lap-time optimization.
+
+## 7. Summary
+
+This stack is a continuous-control RoboRacer architecture centered around:
+
+- legal runtime sensing,
+- LiDAR corridor geometry,
+- automatic per-track mapping,
+- direct MPC control,
+- minimal safety overrides.
+
+Its main strength is not just that it is more advanced than the old stack. Its main strength is that the modules now fit together coherently:
+
+- perception creates a corridor,
+- mapping stabilizes that corridor over repeated runs,
+- MPC uses both live and mapped structure,
+- safety only catches genuine failures.
+
+That is the right foundation for smooth, high-performance autonomous racing.

@@ -72,6 +72,15 @@ This directory hosts ROS 2 API (a meta-package), which supports modular algorith
       $ ros2 launch autodrive_roboracer bringup_graphics.launch.py
       ```
 
+  These bringup files start both:
+  - `autodrive_bridge`
+  - `roboracer_autonomy` (free-space MPC autonomous controller)
+
+  Example with custom speed and control rate:
+  ```bash
+  $ ros2 launch autodrive_roboracer bringup_headless.launch.py max_speed_mps:=8.0 control_hz:=20.0
+  ```
+
 - **Teleoperation:**
   ```bash
   $ ros2 run autodrive_roboracer teleop_keyboard

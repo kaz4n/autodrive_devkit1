@@ -1,0 +1,18 @@
+[0.701s] Invoking command in '/home/t31/test/ws_Comp/autodrive_devkit1/build/autodrive_roboracer': AMENT_PREFIX_PATH=/home/t31/test/ws_Comp/autodrive_devkit1/install/roboracer_autonomy:${AMENT_PREFIX_PATH} PYTHONPATH=/home/t31/test/ws_Comp/autodrive_devkit1/build/autodrive_roboracer/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/t31/test/ws_Comp/autodrive_devkit1/install/autodrive_roboracer/lib/python3.10/site-packages:/home/t31/test/ws_Comp/autodrive_devkit1/build/roboracer_autonomy:/home/t31/test/ws_Comp/autodrive_devkit1/install/roboracer_autonomy/lib/python3.10/site-packages:${PYTHONPATH} VIRTUAL_ENV_PROMPT=(.venv) /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/t31/test/ws_Comp/autodrive_devkit1/build/autodrive_roboracer/build --no-deps symlink_data
+[0.951s] running develop
+[1.122s] running egg_info
+[1.123s] writing autodrive_roboracer.egg-info/PKG-INFO
+[1.123s] writing dependency_links to autodrive_roboracer.egg-info/dependency_links.txt
+[1.123s] writing entry points to autodrive_roboracer.egg-info/entry_points.txt
+[1.123s] writing requirements to autodrive_roboracer.egg-info/requires.txt
+[1.123s] writing top-level names to autodrive_roboracer.egg-info/top_level.txt
+[1.126s] reading manifest file 'autodrive_roboracer.egg-info/SOURCES.txt'
+[1.128s] writing manifest file 'autodrive_roboracer.egg-info/SOURCES.txt'
+[1.128s] running build_ext
+[1.128s] Creating /home/t31/test/ws_Comp/autodrive_devkit1/install/autodrive_roboracer/lib/python3.10/site-packages/autodrive-roboracer.egg-link (link to .)
+[1.129s] Installing autodrive_bridge script to /home/t31/test/ws_Comp/autodrive_devkit1/install/autodrive_roboracer/lib/autodrive_roboracer
+[1.130s] Installing teleop_keyboard script to /home/t31/test/ws_Comp/autodrive_devkit1/install/autodrive_roboracer/lib/autodrive_roboracer
+[1.132s] 
+[1.132s] Installed /home/t31/test/ws_Comp/autodrive_devkit1/build/autodrive_roboracer
+[1.132s] running symlink_data
+[1.159s] Invoked command in '/home/t31/test/ws_Comp/autodrive_devkit1/build/autodrive_roboracer' returned '0': AMENT_PREFIX_PATH=/home/t31/test/ws_Comp/autodrive_devkit1/install/roboracer_autonomy:${AMENT_PREFIX_PATH} PYTHONPATH=/home/t31/test/ws_Comp/autodrive_devkit1/build/autodrive_roboracer/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/t31/test/ws_Comp/autodrive_devkit1/install/autodrive_roboracer/lib/python3.10/site-packages:/home/t31/test/ws_Comp/autodrive_devkit1/build/roboracer_autonomy:/home/t31/test/ws_Comp/autodrive_devkit1/install/roboracer_autonomy/lib/python3.10/site-packages:${PYTHONPATH} VIRTUAL_ENV_PROMPT=(.venv) /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/t31/test/ws_Comp/autodrive_devkit1/build/autodrive_roboracer/build --no-deps symlink_data

@@ -1,21 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
-
-
-class MissionMode(str, Enum):
-    BOOTSTRAP = 'bootstrap'
-    LOCALIZE = 'localize'
-    RACE = 'race'
-    AVOID = 'avoid'
-    RECOVERY = 'recovery'
-    SAFETY_BRAKE = 'safety_brake'
-    TRACK = 'race'
-    GAP_AVOID = 'avoid'
 
 
 @dataclass
@@ -32,15 +20,9 @@ class VehicleState:
     valid: bool = False
     confidence: float = 0.0
     source: str = 'wheel_odom'
-    covariance: np.ndarray = field(
-        default_factory=lambda: np.diag([0.05, 0.05, 0.05]).astype(float)
-    )
 
     def pose_xy(self) -> np.ndarray:
         return np.asarray([self.x, self.y], dtype=float)
-
-
-PoseEstimate = VehicleState
 
 
 @dataclass
@@ -52,79 +34,18 @@ class TrackBoundaries:
     width_mean: float = 0.0
     width_min: float = 0.0
     width_std: float = 0.0
-    center_bias: float = 0.0
-    heading_error: float = 0.0
+    heading_hint: float = 0.0
     curvature_hint: float = 0.0
-    gap_target_angle: float = 0.0
     forward_clearance: float = np.inf
     ttc: float = np.inf
     blocked: bool = False
     confidence: float = 0.0
-    angles: np.ndarray = field(default_factory=lambda: np.asarray([], dtype=float))
     processed_ranges: np.ndarray = field(default_factory=lambda: np.asarray([], dtype=float))
+    angles: np.ndarray = field(default_factory=lambda: np.asarray([], dtype=float))
     metadata: Dict[str, float] = field(default_factory=dict)
 
-    @property
-    def lane_width_estimate(self) -> float:
-        return self.width_mean
-
-    def has_centerline(self) -> bool:
-        return self.centerline.shape[0] >= 2
-
-
-LidarObservation = TrackBoundaries
-
-
-@dataclass
-class CameraObservation:
-    stamp: float = 0.0
-    center_offset: float = 0.0
-    heading_error: float = 0.0
-    confidence: float = 0.0
-    has_left_boundary: bool = False
-    has_right_boundary: bool = False
-    metadata: Dict[str, float] = field(default_factory=dict)
-
-
-@dataclass
-class Waypoint:
-    s: float = 0.0
-    x: float = 0.0
-    y: float = 0.0
-    yaw: float = 0.0
-    curvature: float = 0.0
-    target_speed: float = 0.0
-    width: float = 0.0
-
-    def xy(self) -> np.ndarray:
-        return np.asarray([self.x, self.y], dtype=float)
-
-
-@dataclass
-class TrajectoryPlan:
-    stamp: float = 0.0
-    mode: MissionMode = MissionMode.BOOTSTRAP
-    reference_source: str = 'none'
-    waypoints: List[Waypoint] = field(default_factory=list)
-    desired_heading: float = 0.0
-    curvature: float = 0.0
-    lookahead: float = 0.0
-    target_speed: float = 0.0
-    target_steering_angle: float = 0.0
-    forward_clearance: float = np.inf
-    ttc: float = np.inf
-    blocked: bool = False
-    fallback_active: bool = False
-    confidence: float = 0.0
-    metadata: Dict[str, float] = field(default_factory=dict)
-
-    def path_points(self) -> np.ndarray:
-        if not self.waypoints:
-            return np.zeros((0, 2), dtype=float)
-        return np.asarray([[wp.x, wp.y] for wp in self.waypoints], dtype=float)
-
-
-Plan = TrajectoryPlan
+    def has_corridor(self) -> bool:
+        return self.left_boundary.shape[0] >= 2 or self.right_boundary.shape[0] >= 2
 
 
 @dataclass
@@ -132,14 +53,51 @@ class ControlCommand:
     stamp: float = 0.0
     throttle: float = 0.0
     steering: float = 0.0
+    target_speed: float = 0.0
     emergency: bool = False
     reason: str = ''
+    metadata: Dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
+class MapLocalizerOutput:
+    pose: VehicleState = field(default_factory=VehicleState)
+    corrected: bool = False
+    track_id: str = ''
+    map_confidence: float = 0.0
+    metadata: Dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
+class TrackMapRecord:
+    track_id: str
+    display_name: str
+    fingerprint: np.ndarray = field(default_factory=lambda: np.asarray([], dtype=float))
+    left_points: np.ndarray = field(default_factory=lambda: np.zeros((0, 2), dtype=float))
+    right_points: np.ndarray = field(default_factory=lambda: np.zeros((0, 2), dtype=float))
+    centerline_points: np.ndarray = field(default_factory=lambda: np.zeros((0, 2), dtype=float))
+    created_at: float = 0.0
+    updated_at: float = 0.0
+    last_used_at: float = 0.0
+    updates: int = 0
+    laps_observed: int = 0
+    metadata: Dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
+class SolverDebug:
+    success: bool = False
+    cost: float = 0.0
+    solve_time_ms: float = 0.0
+    iterations: int = 0
+    target_speed: float = 0.0
+    progress_m: float = 0.0
+    predicted_path: np.ndarray = field(default_factory=lambda: np.zeros((0, 2), dtype=float))
 
 
 @dataclass
 class SensorHeartbeat:
     lidar_stamp: float = 0.0
-    camera_stamp: float = 0.0
     imu_stamp: float = 0.0
     left_encoder_stamp: float = 0.0
     right_encoder_stamp: float = 0.0
@@ -152,7 +110,6 @@ class SensorHeartbeat:
     def as_dict(self) -> Dict[str, float]:
         return {
             'lidar': self.lidar_stamp,
-            'camera': self.camera_stamp,
             'imu': self.imu_stamp,
             'left_encoder': self.left_encoder_stamp,
             'right_encoder': self.right_encoder_stamp,
