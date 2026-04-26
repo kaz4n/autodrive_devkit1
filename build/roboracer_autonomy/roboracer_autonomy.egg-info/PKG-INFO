@@ -1,10 +1,10 @@
 Metadata-Version: 2.1
 Name: roboracer-autonomy
-Version: 0.1.0
-Summary: Competition-legal autonomy stack for AutoDRIVE RoboRacer
+Version: 2.0.0
+Summary: Competition-ready autonomy stack for AutoDRIVE RoboRacer - Disparity Extender + Pure Pursuit
 Home-page: UNKNOWN
-Maintainer: OpenAI
-Maintainer-email: openai@example.com
+Maintainer: RoboRacer Team
+Maintainer-email: team@example.com
 License: MIT
 Platform: UNKNOWN
 

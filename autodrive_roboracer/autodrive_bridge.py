@@ -49,6 +49,7 @@ import base64 # Base64 binary-to-text encoding/decoding scheme
 from io import BytesIO # Manipulate bytes data in memory
 from PIL import Image # Python Imaging Library's (PIL's) Image module
 import gzip # Inbuilt module to compress and decompress data and files
+import time
 import autodrive_roboracer.config as config # AutoDRIVE Ecosystem ROS 2 configuration for RoboRacer vehicle
 
 ################################################################################
@@ -87,6 +88,9 @@ class AutoDRIVE:
 # Global declarations
 global autodrive_bridge, cv_bridge, publishers, transform_broadcaster
 autodrive = AutoDRIVE()
+bridge_connected = False
+last_bridge_rx_time = 0.0
+last_bridge_status_log_time = 0.0
 
 #########################################################
 # ROS 2 MESSAGE GENERATING FUNCTIONS
@@ -303,7 +307,17 @@ sio = socketio.Server(async_mode='gevent')
 # Registering "connect" event handler for the server
 @sio.on('connect')
 def connect(sid, environ):
-    print("Connected!")
+    global bridge_connected, last_bridge_rx_time
+    bridge_connected = True
+    last_bridge_rx_time = time.time()
+    print("AutoDRIVE simulator connected to bridge.")
+
+
+@sio.on('disconnect')
+def disconnect(sid):
+    global bridge_connected
+    bridge_connected = False
+    print("AutoDRIVE simulator disconnected from bridge.")
 
 # Registering "Bridge" event handler for the server
 @sio.on('Bridge')
@@ -316,7 +330,11 @@ def bridge(sid, data):
         ########################################################################
         # INCOMMING DATA
         ########################################################################
-        # Actuator feedbacks
+        global autodrive, autodrive_bridge, cv_bridge, publishers, transform_broadcaster
+        global bridge_connected, last_bridge_rx_time
+
+        bridge_connected = True
+        last_bridge_rx_time = time.time()
         autodrive.throttle = float(data["V1 Throttle"])
         autodrive.steering = float(data["V1 Steering"])
         # Wheel encoders
@@ -427,8 +445,25 @@ def main():
     } # Subscriber callback functions
     [autodrive_bridge.create_subscription(e.type, e.topic, callbacks[e.topic], qos_profile) for e in config.pub_sub_dict.subscribers] # Subscribers
 
-    # timer_period = 0.025 # Timer period in seconds
-    # autodrive_bridge.create_timer(timer_period, timer_callback)
+    def bridge_watchdog_callback():
+        global bridge_connected, last_bridge_rx_time, last_bridge_status_log_time
+        now = time.time()
+        if now - last_bridge_status_log_time < 2.0:
+            return
+        last_bridge_status_log_time = now
+
+        if not bridge_connected:
+            autodrive_bridge.get_logger().warning(
+                'Waiting for AutoDRIVE simulator WebSocket connection on port 4567.'
+            )
+            return
+
+        if last_bridge_rx_time <= 0.0 or (now - last_bridge_rx_time) > 1.0:
+            autodrive_bridge.get_logger().warning(
+                f'Bridge connected but no simulator data for {now - last_bridge_rx_time:.2f}s.'
+            )
+
+    autodrive_bridge.create_timer(0.5, bridge_watchdog_callback)
 
     # If num_threads is not specified then num_threads will be multiprocessing.cpu_count() if it is implemented
     # Otherwise it will use a single thread

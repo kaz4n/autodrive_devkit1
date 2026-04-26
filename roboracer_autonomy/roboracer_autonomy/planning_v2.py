@@ -22,6 +22,8 @@ from .math_utils import (
     cumulative_arc_length,
     curvature_from_points,
     headings_from_points,
+    low_pass,
+    moving_average_1d,
     moving_average_points,
     nearest_point_index,
     resample_polyline,

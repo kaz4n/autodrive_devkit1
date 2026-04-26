@@ -22,7 +22,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'autonomy_node = roboracer_autonomy.autonomy_node:main',
+            'autonomy_node = roboracer_autonomy.autonomy_node_v2:main',
         ],
     },
 )

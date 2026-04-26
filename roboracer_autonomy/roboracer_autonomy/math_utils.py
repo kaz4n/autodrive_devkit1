@@ -152,28 +152,42 @@ def transform_points_world_to_local(points: np.ndarray, pose) -> np.ndarray:
     return translated @ rot_t.T
 
 
-def headings_from_points(points: np.ndarray) -> np.ndarray:
+def headings_from_points(points: np.ndarray, closed: bool = False) -> np.ndarray:
     pts = np.asarray(points, dtype=float)
     if pts.shape[0] == 0:
         return np.asarray([], dtype=float)
     if pts.shape[0] == 1:
         return np.asarray([0.0], dtype=float)
-    dx = np.gradient(pts[:, 0])
-    dy = np.gradient(pts[:, 1])
+    if closed and pts.shape[0] >= 3:
+        wrap_pts = np.vstack((pts[-1], pts, pts[0]))
+        dx = np.gradient(wrap_pts[:, 0])[1:-1]
+        dy = np.gradient(wrap_pts[:, 1])[1:-1]
+    else:
+        dx = np.gradient(pts[:, 0])
+        dy = np.gradient(pts[:, 1])
     return np.arctan2(dy, dx).astype(float)
 
 
-def curvature_from_points(points: np.ndarray) -> np.ndarray:
+def curvature_from_points(points: np.ndarray, closed: bool = False) -> np.ndarray:
     pts = np.asarray(points, dtype=float)
     n = pts.shape[0]
     if n < 3:
         return np.zeros((n,), dtype=float)
-    x = pts[:, 0]
-    y = pts[:, 1]
-    dx = np.gradient(x)
-    dy = np.gradient(y)
-    ddx = np.gradient(dx)
-    ddy = np.gradient(dy)
+    if closed:
+        wrap_pts = np.vstack((pts[-1], pts, pts[0]))
+        x = wrap_pts[:, 0]
+        y = wrap_pts[:, 1]
+        dx = np.gradient(x)[1:-1]
+        dy = np.gradient(y)[1:-1]
+        ddx = np.gradient(np.gradient(x))[1:-1]
+        ddy = np.gradient(np.gradient(y))[1:-1]
+    else:
+        x = pts[:, 0]
+        y = pts[:, 1]
+        dx = np.gradient(x)
+        dy = np.gradient(y)
+        ddx = np.gradient(dx)
+        ddy = np.gradient(dy)
     denom = np.power(dx * dx + dy * dy, 1.5) + 1.0e-9
     return ((dx * ddy - dy * ddx) / denom).astype(float)
 

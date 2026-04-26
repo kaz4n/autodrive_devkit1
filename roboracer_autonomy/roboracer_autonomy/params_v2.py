@@ -21,9 +21,9 @@ class VehicleGeometry:
     car_length_m: float = 0.500
     car_width_m: float = 0.270
     max_steer_angle_rad: float = 0.5236  # ~30 degrees
-    max_steer_rate_radps: float = 4.0  # Increased for smoother tracking
+    max_steer_rate_radps: float = 8.0  # Increased for smoother tracking
     mass_kg: float = 5.0  # For dynamic models
-    friction_coefficient: float = 0.8  # Tire-road friction
+    friction_coefficient: float = 0.5  # Tire-road friction
 
 
 @dataclass
@@ -50,18 +50,18 @@ class LidarConfig:
     range_max_clip_m: float = 10.0
     
     # Boundary extraction
-    smoothing_kernel: int = 7  # More smoothing for stability
-    leak_fill_max_bins: int = 8
+    smoothing_kernel: int = 27  # More smoothing for stability
+    leak_fill_max_bins: int = 12
     boundary_lookahead_m: float = 8.0
     x_bin_size_m: float = 0.12  # Finer binning
-    centerline_smoothing_window: int = 9  # More temporal smoothing
+    centerline_smoothing_window: int = 14  # More temporal smoothing
     side_outlier_jump_m: float = 0.35
     
     # Track model
-    min_boundary_points_per_side: int = 4
+    min_boundary_points_per_side: int = 10
     nominal_track_width_m: float = 1.80
     min_track_width_m: float = 0.80
-    max_track_width_m: float = 4.00
+    max_track_width_m: float = 4
     
     # Safety thresholds
     stop_distance_m: float = 0.50
@@ -111,7 +111,7 @@ class PlannerConfig:
     
     # Speed limits
     max_speed_mps: float = 6.0  # Conservative default
-    avoid_mode_speed_mps: float = 3.0
+    avoid_mode_speed_mps: float = 2.0
     localize_mode_speed_mps: float = 1.2
     min_speed_mps: float = 0.3  # Don't go too slow
     
@@ -129,7 +129,7 @@ class PlannerConfig:
     # Speed modulation
     clearance_speed_gain: float = 1.50
     narrow_width_slowdown_m: float = 1.00
-    curvature_speed_reduction: float = 0.7  # Additional reduction in high curvature
+    curvature_speed_reduction: float = 1.7  # Additional reduction in high curvature
     
     # Validation
     min_track_confidence: float = 0.25
@@ -147,12 +147,12 @@ class PlannerConfig:
 class ControllerConfig:
     """MPPI controller parameters."""
     # MPPI sampling
-    num_samples: int = 500  # Number of trajectory samples
-    sample_horizon_s: float = 1.2  # How far to roll out trajectories
+    num_samples: int = 1000  # Number of trajectory samples
+    sample_horizon_s: float = 3  # How far to roll out trajectories
     dt: float = 0.02  # Time step for rollouts
     
     # Cost function weights
-    cost_tracking_weight: float = 5.0  # Path tracking importance
+    cost_tracking_weight: float = 9.0  # Path tracking importance
     cost_smoothness_weight: float = 2.0  # Control smoothness
     cost_collision_weight: float = 10.0  # Collision avoidance
     cost_speed_weight: float = 1.5  # Speed tracking
@@ -161,7 +161,7 @@ class ControllerConfig:
     temperature: float = 0.5
     
     # Control limits
-    steering_kp: float = 1.2
+    steering_kp: float = 1.9
     steering_kd: float = 0.15
     steering_feedforward_gain: float = 0.95
     steer_yaw_rate_damping: float = 0.10

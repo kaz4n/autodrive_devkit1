@@ -75,12 +75,12 @@ class RoboRacerAutonomyNodeV2(Node):
         self._control_hz = max(50.0, float(self.get_parameter('control_hz').value))
         self._debug_enabled = bool(self.get_parameter('debug_enabled').value)
 
-        # QoS profile for low-latency sensor data
+        # Match bridge QoS so command topics are compatible.
         qos = QoSProfile(
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,  # Changed for lower latency
+            reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.VOLATILE,
             history=QoSHistoryPolicy.KEEP_LAST,
-            depth=5,  # Increased depth to avoid dropping messages
+            depth=1,
         )
 
         # Initialize components
@@ -97,7 +97,16 @@ class RoboRacerAutonomyNodeV2(Node):
         self._mission = MissionManagerV2(self._config.mission)
 
         # State variables
-        self._heartbeats = SensorHeartbeat()
+        now = self._now()
+        self._heartbeats = SensorHeartbeat(
+            lidar_stamp=now,
+            imu_stamp=now,
+            left_encoder_stamp=now,
+            right_encoder_stamp=now,
+            steering_stamp=now,
+            camera_stamp=now,
+            external_pose_stamp=now,
+        )
         self._latest_lidar = LidarObservation()
         self._latest_camera = CameraObservation()
         self._latest_plan = Plan()
@@ -387,7 +396,8 @@ def main(args=None) -> None:
         rclpy.spin(node)
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

@@ -13,7 +13,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('max_speed_mps', default_value='6.0'),
-        DeclareLaunchArgument('control_hz',    default_value='40.0'),
+        DeclareLaunchArgument('control_hz',    default_value='400.0'),
         DeclareLaunchArgument('mode',          default_value='auto'),
 
         Node(

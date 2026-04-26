@@ -1,3 +1,3 @@
 [console_scripts]
-autonomy_node = roboracer_autonomy.autonomy_node:main
+autonomy_node = roboracer_autonomy.autonomy_node_v2:main
 

@@ -1,5 +1,6 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -10,11 +11,13 @@ def generate_launch_description():
     max_speed_mps = LaunchConfiguration('max_speed_mps')
     control_hz = LaunchConfiguration('control_hz')
     mode = LaunchConfiguration('mode')
+    use_rviz = LaunchConfiguration('use_rviz')
 
     return LaunchDescription([
         DeclareLaunchArgument('max_speed_mps', default_value='6.0'),
-        DeclareLaunchArgument('control_hz',    default_value='40.0'),
+        DeclareLaunchArgument('control_hz',    default_value='400.0'),
         DeclareLaunchArgument('mode',          default_value='auto'),
+        DeclareLaunchArgument('use_rviz',      default_value='true'),
 
         Node(
             package='autodrive_roboracer',
@@ -42,6 +45,7 @@ def generate_launch_description():
             package='rviz2',
             executable='rviz2',
             name='rviz',
+            condition=IfCondition(use_rviz),
             arguments=['-d', [FindPackageShare('autodrive_roboracer'), '/rviz',
                                '/autodrive_roboracer.rviz']],
         ),
