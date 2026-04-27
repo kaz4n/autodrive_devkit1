@@ -1,4 +1,0 @@
-[console_scripts]
-autodrive_bridge = autodrive_roboracer.autodrive_bridge:main
-teleop_keyboard = autodrive_roboracer.teleop_keyboard:main
-

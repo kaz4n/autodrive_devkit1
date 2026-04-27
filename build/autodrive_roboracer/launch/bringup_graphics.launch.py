@@ -1,1 +1,0 @@
-/home/t31/test/ws_Comp/autodrive_devkit1/launch/bringup_graphics.launch.py
